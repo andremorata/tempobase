@@ -152,6 +152,8 @@ export function TimerBar() {
   const [editingStart, setEditingStart] = useState(false);
   const [startInput, setStartInput] = useState("");
   const startInputRef = useRef<HTMLInputElement>(null);
+  // Set by Escape so the blur that follows discards the edit instead of saving it
+  const cancelStartEditRef = useRef(false);
 
   // Track which running entry we last synced to avoid overwriting live edits on refetch
   const syncedEntryId = useRef<string | null>(null);
@@ -264,6 +266,12 @@ export function TimerBar() {
     if (!parsed) { setEditingStart(false); return; }
 
     const base = new Date(runningEntry.startTime);
+    // Tabbing through without changing the value must not rewrite the start time
+    if (parsed.hours === base.getHours() && parsed.minutes === base.getMinutes()) {
+      setEditingStart(false);
+      return;
+    }
+
     const newStart = new Date(
       base.getFullYear(), base.getMonth(), base.getDate(),
       parsed.hours, parsed.minutes, 0, 0,
@@ -472,10 +480,21 @@ export function TimerBar() {
               value={startInput}
               onChange={(e) => setStartInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") confirmStartEdit();
-                if (e.key === "Escape") setEditingStart(false);
+                // Both keys route through onBlur so a single path saves or discards
+                if (e.key === "Enter") e.currentTarget.blur();
+                if (e.key === "Escape") {
+                  cancelStartEditRef.current = true;
+                  e.currentTarget.blur();
+                }
               }}
-              onBlur={() => setEditingStart(false)}
+              onBlur={() => {
+                if (cancelStartEditRef.current) {
+                  cancelStartEditRef.current = false;
+                  setEditingStart(false);
+                  return;
+                }
+                confirmStartEdit();
+              }}
               className="w-24 h-8 font-mono text-center tabular-nums"
               placeholder="09:00"
             />

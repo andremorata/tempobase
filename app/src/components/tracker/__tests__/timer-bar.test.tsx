@@ -1,10 +1,11 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TimerBar } from "../timer-bar";
 
-const { mockToastError, mockStartMutate, mockStopMutate, mockCancelMutate, mockUseRunningEntry } = vi.hoisted(() => ({
+const { mockToastError, mockStartMutate, mockStopMutate, mockCancelMutate, mockAdjustStartMutate, mockUseRunningEntry } = vi.hoisted(() => ({
   mockToastError: vi.fn(),
+  mockAdjustStartMutate: vi.fn(),
   mockStartMutate: vi.fn(),
   mockStopMutate: vi.fn(),
   mockCancelMutate: vi.fn(),
@@ -18,7 +19,7 @@ vi.mock("@/lib/api/hooks/time-entries", () => ({
   useStopTimer: () => ({ mutate: mockStopMutate, isPending: false }),
   useRunningEntry: mockUseRunningEntry,
   useUpdateTimeEntry: () => ({ mutate: vi.fn(), isPending: false }),
-  useAdjustTimerStart: () => ({ mutate: vi.fn(), isPending: false }),
+  useAdjustTimerStart: () => ({ mutate: mockAdjustStartMutate, isPending: false }),
   useTimeEntries: () => ({ data: [] }),
   useCancelTimer: () => ({ mutate: mockCancelMutate, isPending: false }),
 }));
@@ -203,5 +204,66 @@ describe("TimerBar", () => {
       description: "A timer is already running",
     });
     expect(screen.queryByText("A timer is already running")).toBeNull();
+  });
+
+  describe("start time edit", () => {
+    // 15:00 local today, timer started at 14:00 local
+    const now = new Date(2026, 2, 21, 15, 0, 0);
+    const startTime = new Date(2026, 2, 21, 14, 0, 0).toISOString();
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(now);
+      vi.mocked(useRunningEntry).mockReturnValue({
+        data: makeRunningEntry({ id: "entry-edit", startTime }),
+      } as ReturnType<typeof useRunningEntry>);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function openEditor() {
+      render(<TimerBar />, { wrapper: makeWrapper() });
+      fireEvent.click(screen.getByTitle("Click to adjust start time"));
+      return screen.getByPlaceholderText("09:00") as HTMLInputElement;
+    }
+
+    it("saves the new start time when the field loses focus", () => {
+      const input = openEditor();
+      fireEvent.change(input, { target: { value: "13:30" } });
+      fireEvent.blur(input);
+
+      expect(mockAdjustStartMutate).toHaveBeenCalledOnce();
+      expect(mockAdjustStartMutate.mock.calls[0][0]).toEqual({
+        id: "entry-edit",
+        startTime: new Date(2026, 2, 21, 13, 30, 0).toISOString(),
+      });
+    });
+
+    it("saves once when Enter is pressed", () => {
+      const input = openEditor();
+      fireEvent.change(input, { target: { value: "13:30" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(mockAdjustStartMutate).toHaveBeenCalledOnce();
+    });
+
+    it("discards the edit when Escape is pressed", () => {
+      const input = openEditor();
+      fireEvent.change(input, { target: { value: "13:30" } });
+      fireEvent.keyDown(input, { key: "Escape" });
+
+      expect(mockAdjustStartMutate).not.toHaveBeenCalled();
+      expect(screen.queryByPlaceholderText("09:00")).toBeNull();
+    });
+
+    it("does not save when the value is unchanged", () => {
+      const input = openEditor();
+      fireEvent.blur(input);
+
+      expect(mockAdjustStartMutate).not.toHaveBeenCalled();
+      expect(screen.queryByPlaceholderText("09:00")).toBeNull();
+    });
   });
 });
