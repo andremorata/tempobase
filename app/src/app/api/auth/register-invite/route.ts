@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import * as bcrypt from "bcryptjs";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { z } from "zod";
 
@@ -124,6 +125,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Validation failed", details: error.issues },
         { status: 400 }
+      );
+    }
+
+    // A concurrent registration with the same email hit the unique index
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return NextResponse.json(
+        { error: "Email already registered" },
+        { status: 409 }
       );
     }
 
