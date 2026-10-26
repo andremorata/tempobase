@@ -33,6 +33,7 @@
 TempoBase uses Auth.js with JWT session cookies.
 
 - User identity data lives in `domain_users`.
+- Emails are stored lowercase and are unique across workspaces among active users (`domain_users_email_active_key`, a partial unique index that skips soft-deleted rows).
 - Password verification depends on stored password hashes.
 - The auth model does not require database-backed session tables when using JWT strategy.
 

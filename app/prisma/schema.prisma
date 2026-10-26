@@ -2,6 +2,7 @@
 
 generator client {
   provider = "prisma-client-js"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -100,6 +101,9 @@ model User {
   importSessions       ImportSession[]
 
   @@unique([accountId, id])
+  // One active account per email across workspaces. Emails are stored lowercase;
+  // soft-deleted users are excluded so a removed member can be invited again.
+  @@unique([email], map: "domain_users_email_active_key", where: raw("is_deleted = false"))
   @@index([accountId])
   @@map("domain_users")
 }
