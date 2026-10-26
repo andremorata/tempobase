@@ -1,4 +1,4 @@
-# TempoBase Lite — Current Status
+# TempoBase — Current Status
 
 This file captures the current operating posture of the repository. It is not the task tracker; GitHub Issues are the official source for active work.
 
@@ -12,9 +12,10 @@ This file captures the current operating posture of the repository. It is not th
 
 ## Recent Structural Changes
 
+- Renamed the GitHub repository from `tempobase-lite` to `tempobase` (2026-10-26). The old private `tempobase` repository is archived as `tempobase-legacy`. The Vercel project keeps the name `tempobase-lite`; production runs on `tempobase.pmr.dev`.
 - Renamed the executable application folder from `frontend/` to `app/`.
 - Added root-level pnpm scripts that delegate to `app/`.
-- Replaced scaffold-style agent guidance with TempoBase Lite-specific instructions.
+- Replaced scaffold-style agent guidance with TempoBase-specific instructions.
 - Added PWA manifest and app icons for installable app support.
 - Added stale timer recovery: a `time_entries.last_seen_at` heartbeat, a gap-derived `time_entries.last_session_end_at` recovery point, plus a prompt when a timer is found running from a previous day.
 - Moved local phase issue files into the specs archive.
