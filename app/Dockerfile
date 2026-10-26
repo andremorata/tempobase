@@ -11,12 +11,10 @@ ARG NEXT_PUBLIC_API_URL=/api
 ARG DATABASE_URL=postgresql://postgres:localdev@localhost:5432/tempobase
 ARG DIRECT_DATABASE_URL=postgresql://postgres:localdev@localhost:5432/tempobase
 ARG NEXTAUTH_URL=http://localhost:3000
-ARG NEXTAUTH_SECRET=change-me-in-production-use-openssl-rand-base64-32
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV DATABASE_URL=$DATABASE_URL
 ENV DIRECT_DATABASE_URL=$DIRECT_DATABASE_URL
 ENV NEXTAUTH_URL=$NEXTAUTH_URL
-ENV NEXTAUTH_SECRET=$NEXTAUTH_SECRET
 RUN pnpm build
 
 # Runtime

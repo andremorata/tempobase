@@ -6,7 +6,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId, getCurrentUserId } from "@/lib/auth/helpers";
+import { requireAuth, getCurrentTenantId, getCurrentUserId, authErrorResponse } from "@/lib/auth/helpers";
 import { mapTimeEntry } from "../mappers";
 
 // Comfortably above the client's 30s poll interval, which also pauses while the window is
@@ -69,6 +69,9 @@ export async function GET() {
       mapTimeEntry(sessionEnd ? { ...runningTimer, lastSessionEndAt: sessionEnd } : runningTimer)
     );
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Get running timer error:", error);
     return NextResponse.json(
       { error: "Failed to fetch running timer" },

@@ -4,8 +4,10 @@
  * Utilities for authentication and authorization in Next.js API routes.
  */
 
+import { NextResponse } from "next/server";
 import { auth } from "./config";
 import type { UserRole } from "@prisma/client";
+import { MANAGER_ROLES, TRACKER_ROLES } from "./roles";
 
 /**
  * Get current session or throw 401
@@ -23,7 +25,7 @@ export async function requireAuth() {
 /**
  * Check if user has required role
  */
-export async function requireRole(allowedRoles: UserRole[]) {
+export async function requireRole(allowedRoles: readonly UserRole[]) {
   const session = await requireAuth();
 
   if (!allowedRoles.includes(session.user.role)) {
@@ -69,6 +71,28 @@ export async function requireOwnerOrAdmin() {
  */
 export async function requireOwner() {
   return requireRole(["Owner"]);
+}
+
+/**
+ * Check if user can manage clients, projects, tasks and other users' entries
+ */
+export async function requireManager() {
+  return requireRole(MANAGER_ROLES);
+}
+
+/**
+ * Check if user can track time (everyone except Viewer)
+ */
+export async function requireTracker() {
+  return requireRole(TRACKER_ROLES);
+}
+
+/**
+ * Maps an AuthError to its 401/403 response; returns null for any other error
+ */
+export function authErrorResponse(error: unknown) {
+  if (!(error instanceof AuthError)) return null;
+  return NextResponse.json({ error: error.message }, { status: error.status });
 }
 
 /**

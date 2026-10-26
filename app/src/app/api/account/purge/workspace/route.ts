@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentTenantId, getCurrentUserId, requireOwner } from "@/lib/auth/helpers";
+import { getCurrentTenantId, getCurrentUserId, requireOwner, authErrorResponse } from "@/lib/auth/helpers";
 
 const DeleteWorkspaceSchema = z.object({
   confirmationText: z.string().min(1),
@@ -127,6 +127,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Delete workspace error:", error);
 
     if (error instanceof z.ZodError) {

@@ -8,7 +8,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireOwnerOrAdmin, getCurrentTenantId } from "@/lib/auth/helpers";
+import { requireOwnerOrAdmin, getCurrentTenantId, authErrorResponse } from "@/lib/auth/helpers";
+import { refsBelongToAccount } from "@/lib/auth/access";
 
 const SetAccessSchema = z.object({
   projectIds: z.array(z.string().uuid()),
@@ -53,6 +54,9 @@ export async function GET(
       allowedTaskIds: taskAccess.map((r) => r.taskId),
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Get member access error:", error);
     return NextResponse.json({ error: "Failed to fetch member access" }, { status: 500 });
   }
@@ -76,6 +80,10 @@ export async function PUT(
     const body = await request.json();
     const { projectIds, taskIds } = SetAccessSchema.parse(body);
 
+    if (!(await refsBelongToAccount(accountId, { projectIds, taskIds }))) {
+      return NextResponse.json({ error: "Project or task not found" }, { status: 404 });
+    }
+
     await prisma.$transaction([
       prisma.userProjectAccess.deleteMany({ where: { userId: id, accountId } }),
       prisma.userTaskAccess.deleteMany({ where: { userId: id, accountId } }),
@@ -97,6 +105,9 @@ export async function PUT(
 
     return NextResponse.json({ allowedProjectIds: projectIds, allowedTaskIds: taskIds });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Set member access error:", error);
 
     if (error instanceof z.ZodError) {

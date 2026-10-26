@@ -116,7 +116,7 @@ interface MemberAccess {
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { user, updateUser, logout } = useAuth();
+  const { user, updateUser, login, logout } = useAuth();
   const isOwner = user?.role === "Owner";
   const isAccountAdmin = user?.role === "Owner" || user?.role === "Admin";
 
@@ -266,6 +266,10 @@ export default function SettingsPage() {
 
     try {
       await changePassword.mutateAsync({ currentPassword, newPassword });
+      // A password change revokes every existing session, this one included; sign back in here.
+      if (user?.email) {
+        await login({ email: user.email, password: newPassword });
+      }
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
@@ -454,7 +458,7 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      {isAccountAdmin && (
+      {isOwner && (
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">

@@ -8,7 +8,7 @@ import { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentTenantId, requireOwnerOrAdmin } from "@/lib/auth/helpers";
+import { getCurrentTenantId, requireOwnerOrAdmin, authErrorResponse } from "@/lib/auth/helpers";
 
 const QuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
@@ -113,6 +113,9 @@ export async function GET(request: NextRequest) {
       hasPreviousPage: query.page > 1,
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("List audit logs error:", error);
 
     if (error instanceof z.ZodError) {

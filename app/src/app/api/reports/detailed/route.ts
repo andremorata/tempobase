@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { toNumber } from "@/lib/db/decimal";
-import { requireAuth, getCurrentTenantId, getCurrentUser } from "@/lib/auth/helpers";
+import { requireAuth, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
 import { roundUpToTenMin } from "@/lib/reports/rounding";
 import { getMemberAccess, applyAccessFilter } from "@/lib/auth/access";
 
@@ -61,17 +61,13 @@ export async function GET(request: NextRequest) {
       where.entryDate = entryDate;
     }
 
-    // Apply project/task access restrictions (intersects with any caller-supplied filters)
-    applyAccessFilter(where, access, query.projectId, query.taskId);
+    // Apply user/project/task access restrictions (intersects with any caller-supplied filters)
+    applyAccessFilter(where, access, query.projectId, query.taskId, query.userId);
 
     if (query.clientId) {
       where.project = {
         clientId: query.clientId,
       };
-    }
-
-    if (query.userId) {
-      where.userId = query.userId;
     }
 
     if (query.tagId) {
@@ -204,6 +200,9 @@ export async function GET(request: NextRequest) {
       totalPages: Math.ceil(total / query.pageSize),
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Detailed report error:", error);
 
     if (error instanceof z.ZodError) {

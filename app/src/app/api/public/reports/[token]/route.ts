@@ -10,6 +10,7 @@ import { prisma } from "@/lib/db/prisma";
 import { toNumber } from "@/lib/db/decimal";
 import { roundUpToTenMin } from "@/lib/reports/rounding";
 import { toChartGranularity, type ChartGranularity } from "@/lib/reports/granularity";
+import { applyAccessFilter, getMemberAccess } from "@/lib/auth/access";
 
 type PublicSharedReportFilters = {
   from?: string | null;
@@ -116,6 +117,7 @@ export async function GET(
         filtersJson: true,
         expiresAt: true,
         account: { select: { isDeleted: true } },
+        createdBy: { select: { id: true, role: true, canViewAmounts: true } },
       },
     });
 
@@ -135,8 +137,15 @@ export async function GET(
       );
     }
 
-    // Parse filters
+    // Parse filters. The link never shows more than its creator can see today:
+    // amounts follow the creator's current permission, entries their current scope.
     const filters = parsePublicSharedReportFilters(shared.filtersJson);
+    filters.showAmounts = Boolean(filters.showAmounts && shared.createdBy.canViewAmounts);
+    const creatorAccess = await getMemberAccess(
+      shared.createdBy.id,
+      shared.accountId,
+      shared.createdBy.role
+    );
 
     // Build base where clause
     const where: Prisma.TimeEntryWhereInput = {
@@ -156,19 +165,13 @@ export async function GET(
       where.entryDate = entryDate;
     }
 
-    if (filters.projectId) {
-      where.projectId = filters.projectId;
-    }
-
     if (filters.clientId) {
       where.project = {
         clientId: filters.clientId,
       };
     }
 
-    if (filters.taskId) {
-      where.taskId = filters.taskId;
-    }
+    applyAccessFilter(where, creatorAccess, filters.projectId, filters.taskId);
 
     if (filters.tagId) {
       where.tags = {

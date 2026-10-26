@@ -6,14 +6,14 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId } from "@/lib/auth/helpers";
+import { requireManager, getCurrentTenantId, authErrorResponse } from "@/lib/auth/helpers";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAuth();
+    await requireManager();
     const accountId = await getCurrentTenantId();
     const { id } = await params;
 
@@ -79,6 +79,9 @@ export async function POST(
       tasks: project.tasks,
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Archive project error:", error);
     return NextResponse.json(
       { error: "Failed to archive project" },

@@ -8,7 +8,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentTenantId, requireOwnerOrAdmin, getCurrentUserId } from "@/lib/auth/helpers";
+import { getCurrentTenantId, requireOwnerOrAdmin, getCurrentUserId, authErrorResponse } from "@/lib/auth/helpers";
+import type { UserRole } from "@prisma/client";
+
+/**
+ * Only an Owner may grant, change or remove Owner and Admin roles; Admins manage
+ * Manager/Member/Viewer. Nobody changes their own role, so an Owner always remains.
+ */
+function canManageMember(actorRole: UserRole, targetRole: UserRole, newRole?: UserRole): boolean {
+  if (actorRole === "Owner") return true;
+  const privileged = (role?: UserRole) => role === "Owner" || role === "Admin";
+  return !privileged(targetRole) && !privileged(newRole);
+}
 
 const UpdateMemberRoleSchema = z.object({
   role: z.enum(["Owner", "Admin", "Manager", "Member", "Viewer"]).optional(),
@@ -22,7 +33,7 @@ export async function PUT(
 ) {
   try {
     void request;
-    await requireOwnerOrAdmin();
+    const session = await requireOwnerOrAdmin();
     const accountId = await getCurrentTenantId();
     const { id } = await params;
 
@@ -43,6 +54,13 @@ export async function PUT(
         { error: "Team member not found" },
         { status: 404 }
       );
+    }
+
+    if (validated.role !== undefined && id === session.user.id) {
+      return NextResponse.json({ error: "You cannot change your own role" }, { status: 403 });
+    }
+    if (!canManageMember(session.user.role, member.role, validated.role)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     // Update member settings
@@ -67,6 +85,9 @@ export async function PUT(
 
     return NextResponse.json(updatedMember);
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Update member role error:", error);
 
     if (error instanceof z.ZodError) {
@@ -89,7 +110,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireOwnerOrAdmin();
+    const session = await requireOwnerOrAdmin();
     const accountId = await getCurrentTenantId();
     const currentUserId = await getCurrentUserId();
     const { id } = await params;
@@ -118,6 +139,10 @@ export async function DELETE(
       );
     }
 
+    if (!canManageMember(session.user.role, member.role)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     // Soft delete the member
     await prisma.user.update({
       where: { id },
@@ -130,6 +155,9 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Remove member error:", error);
     return NextResponse.json(
       { error: "Failed to remove team member" },

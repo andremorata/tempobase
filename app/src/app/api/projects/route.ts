@@ -10,7 +10,8 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { toNumber } from "@/lib/db/decimal";
-import { requireAuth, getCurrentTenantId, getCurrentUser } from "@/lib/auth/helpers";
+import { requireManager, requireAuth, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
+import { canSeeRates, refsBelongToAccount } from "@/lib/auth/access";
 
 // ─── List Projects ────────────────────────────────────────────────────────
 
@@ -58,6 +59,8 @@ export async function GET() {
       },
     });
 
+    const showRates = canSeeRates(currentUser);
+
     return NextResponse.json(
       projects.map((p) => ({
         id: p.id,
@@ -67,7 +70,7 @@ export async function GET() {
         color: p.color,
         status: p.status,
         billingType: p.billingType,
-        hourlyRate: p.hourlyRate === null ? null : toNumber(p.hourlyRate),
+        hourlyRate: p.hourlyRate === null || !showRates ? null : toNumber(p.hourlyRate),
         budgetHours: p.budgetHours === null ? null : toNumber(p.budgetHours),
         isArchived: p.status === "Archived",
         createdAt: p.createdAt,
@@ -75,11 +78,14 @@ export async function GET() {
         client: p.client,
         tasks: p.tasks.map((task) => ({
           ...task,
-          hourlyRate: task.hourlyRate === null ? null : toNumber(task.hourlyRate),
+          hourlyRate: task.hourlyRate === null || !showRates ? null : toNumber(task.hourlyRate),
         })),
       }))
     );
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("List projects error:", error);
     return NextResponse.json(
       { error: "Failed to fetch projects" },
@@ -101,11 +107,15 @@ const CreateProjectSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAuth();
+    await requireManager();
     const accountId = await getCurrentTenantId();
 
     const body = await request.json();
     const validated = CreateProjectSchema.parse(body);
+
+    if (!(await refsBelongToAccount(accountId, { clientIds: [validated.clientId] }))) {
+      return NextResponse.json({ error: "Client not found" }, { status: 404 });
+    }
 
     const project = await prisma.project.create({
       data: {
@@ -147,6 +157,9 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Create project error:", error);
 
     if (error instanceof z.ZodError) {

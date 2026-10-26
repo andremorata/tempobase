@@ -6,7 +6,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId } from "@/lib/auth/helpers";
+import { requireAuth, getCurrentTenantId, authErrorResponse } from "@/lib/auth/helpers";
 
 export async function GET() {
   try {
@@ -51,6 +51,9 @@ export async function GET() {
       }))
     );
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("List team members error:", error);
     return NextResponse.json(
       { error: "Failed to fetch team members" },

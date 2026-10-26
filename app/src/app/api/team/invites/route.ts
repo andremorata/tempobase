@@ -9,13 +9,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId, requireOwnerOrAdmin, getCurrentUserId } from "@/lib/auth/helpers";
+import { getCurrentTenantId, requireOwnerOrAdmin, getCurrentUserId, authErrorResponse } from "@/lib/auth/helpers";
 
 // ─── List Invites ─────────────────────────────────────────────────────────
 
 export async function GET() {
   try {
-    await requireAuth();
+    // Invite tokens let anyone join the workspace, so only inviters may read them
+    await requireOwnerOrAdmin();
     const accountId = await getCurrentTenantId();
 
     const invites = await prisma.accountInvite.findMany({
@@ -44,6 +45,9 @@ export async function GET() {
 
     return NextResponse.json(invitesWithUrls);
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("List invites error:", error);
     return NextResponse.json(
       { error: "Failed to fetch invites" },
@@ -107,6 +111,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(inviteWithUrl, { status: 201 });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Create invite error:", error);
 
     if (error instanceof z.ZodError) {

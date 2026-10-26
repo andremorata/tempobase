@@ -8,8 +8,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId, getCurrentUser } from "@/lib/auth/helpers";
-import { getMemberAccess } from "@/lib/auth/access";
+import { requireTracker, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
+import { getMemberAccess, MANAGER_ROLES } from "@/lib/auth/access";
 
 const BulkTagSchema = z.object({
   entryIds: z.array(z.string().uuid()).min(1),
@@ -18,7 +18,7 @@ const BulkTagSchema = z.object({
 
 export async function PUT(request: NextRequest) {
   try {
-    await requireAuth();
+    await requireTracker();
     const accountId = await getCurrentTenantId();
     const currentUser = await getCurrentUser();
     const access = await getMemberAccess(currentUser.id, accountId, currentUser.role);
@@ -32,6 +32,8 @@ export async function PUT(request: NextRequest) {
       accountId,
       isDeleted: false,
       ...(access.projectIds !== null ? { projectId: { in: access.projectIds } } : {}),
+      // Only managers act on other users' entries
+      ...(MANAGER_ROLES.includes(currentUser.role) ? {} : { userId: currentUser.id }),
     };
 
     const entries = await prisma.timeEntry.findMany({
@@ -101,6 +103,9 @@ export async function PUT(request: NextRequest) {
       updatedCount: validated.entryIds.length,
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Bulk tag error:", error);
 
     if (error instanceof z.ZodError) {

@@ -10,7 +10,8 @@ import { z } from "zod";
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/db/prisma";
 import type { ReportGroupByInput } from "@/lib/api/types";
-import { requireAuth, getCurrentTenantId, getCurrentUserId } from "@/lib/auth/helpers";
+import { requireAuth, requireTracker, getCurrentTenantId, getCurrentUser, getCurrentUserId, authErrorResponse } from "@/lib/auth/helpers";
+import { MANAGER_ROLES } from "@/lib/auth/access";
 import { toPersistedReportGroupBy } from "@/lib/reports/group-by";
 import type { ChartGranularity } from "@/lib/reports/granularity";
 
@@ -76,10 +77,13 @@ export async function GET() {
   try {
     await requireAuth();
     const accountId = await getCurrentTenantId();
+    const currentUser = await getCurrentUser();
 
+    // Tokens are bearer credentials: only managers see links created by others
     const reports = await prisma.sharedReport.findMany({
       where: {
         accountId,
+        ...(MANAGER_ROLES.includes(currentUser.role) ? {} : { createdByUserId: currentUser.id }),
       },
       select: {
         id: true,
@@ -113,6 +117,9 @@ export async function GET() {
 
     return NextResponse.json(reportsWithFilters);
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("List shared reports error:", error);
     return NextResponse.json(
       { error: "Failed to list shared reports" },
@@ -123,7 +130,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAuth();
+    await requireTracker();
     const accountId = await getCurrentTenantId();
     const userId = await getCurrentUserId();
 
@@ -254,6 +261,9 @@ export async function POST(request: NextRequest) {
       { status: existing ? 200 : 201 }
     );
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Create shared report error:", error);
 
     if (error instanceof z.ZodError) {

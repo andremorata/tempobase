@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { toNumber } from "@/lib/db/decimal";
-import { requireAuth, getCurrentTenantId, getCurrentUser } from "@/lib/auth/helpers";
+import { requireAuth, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
 import { roundUpToTenMin } from "@/lib/reports/rounding";
 import { getMemberAccess, applyAccessFilter } from "@/lib/auth/access";
 
@@ -51,12 +51,8 @@ export async function GET(request: NextRequest) {
       where.entryDate = entryDate;
     }
 
-    // Apply project/task access restrictions (intersects with any caller-supplied filters)
-    applyAccessFilter(where, access, query.projectId, query.taskId);
-
-    if (query.userId) {
-      where.userId = query.userId;
-    }
+    // Apply user/project/task access restrictions (intersects with any caller-supplied filters)
+    applyAccessFilter(where, access, query.projectId, query.taskId, query.userId);
 
     if (query.billable === "true") {
       where.isBillable = true;
@@ -148,6 +144,9 @@ export async function GET(request: NextRequest) {
       grandTotal: Number(grandTotal.toFixed(2)),
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Weekly report error:", error);
 
     if (error instanceof z.ZodError) {

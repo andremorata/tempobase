@@ -2,13 +2,13 @@
  * Account Management Endpoints
  *
  * GET /api/account - Get current account settings
- * PUT /api/account - Update account settings (Owner/Admin only)
+ * PUT /api/account - Update account settings (Owner only)
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId, requireOwnerOrAdmin } from "@/lib/auth/helpers";
+import { requireAuth, getCurrentTenantId, requireOwner, authErrorResponse } from "@/lib/auth/helpers";
 
 // ─── Get Account ──────────────────────────────────────────────────────────
 
@@ -38,6 +38,9 @@ export async function GET() {
 
     return NextResponse.json(account);
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Get account error:", error);
     return NextResponse.json(
       { error: "Failed to fetch account" },
@@ -57,7 +60,7 @@ const UpdateAccountSchema = z.object({
 
 export async function PUT(request: NextRequest) {
   try {
-    await requireOwnerOrAdmin();
+    await requireOwner();
     const accountId = await getCurrentTenantId();
 
     const body = await request.json();
@@ -91,6 +94,9 @@ export async function PUT(request: NextRequest) {
 
     return NextResponse.json(account);
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Update account error:", error);
 
     if (error instanceof z.ZodError) {

@@ -2,7 +2,8 @@ import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const authMock = vi.hoisted(() => ({
-  requireAuth: vi.fn(),
+  requireOwnerOrAdmin: vi.fn(),
+  authErrorResponse: vi.fn(() => null),
   getCurrentTenantId: vi.fn(),
   getCurrentUserId: vi.fn(),
 }));
@@ -91,7 +92,7 @@ describe("CSV import routes", () => {
   beforeEach(() => {
     vi.resetAllMocks();
 
-    authMock.requireAuth.mockResolvedValue(undefined);
+    authMock.requireOwnerOrAdmin.mockResolvedValue(undefined);
     authMock.getCurrentTenantId.mockResolvedValue(accountId);
     authMock.getCurrentUserId.mockResolvedValue(userId);
 

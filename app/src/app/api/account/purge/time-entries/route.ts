@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentTenantId, requireOwnerOrAdmin } from "@/lib/auth/helpers";
+import { getCurrentTenantId, requireOwnerOrAdmin, authErrorResponse } from "@/lib/auth/helpers";
 
 const PurgeTimeEntriesSchema = z.object({
   from: z.string().optional(),
@@ -55,6 +55,9 @@ export async function POST(request: NextRequest) {
       purgedAt: new Date().toISOString(),
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Purge time entries error:", error);
 
     if (error instanceof z.ZodError) {

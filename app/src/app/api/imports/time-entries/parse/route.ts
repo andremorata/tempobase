@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId, getCurrentUserId } from "@/lib/auth/helpers";
+import { requireOwnerOrAdmin, getCurrentTenantId, getCurrentUserId, authErrorResponse } from "@/lib/auth/helpers";
 
 const DateFormatSchema = z.enum(["ymd", "dmy", "mdy"]).default("ymd");
 
@@ -29,7 +29,7 @@ type ParsedImportRow = {
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAuth();
+    await requireOwnerOrAdmin();
     const accountId = await getCurrentTenantId();
     const userId = await getCurrentUserId();
 
@@ -269,6 +269,9 @@ export async function POST(request: NextRequest) {
       previouslyImportedAt: previousCompletedImport?.completedAt?.toISOString() ?? null,
      });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Parse CSV error:", error);
 
     if (error instanceof z.ZodError) {

@@ -11,12 +11,16 @@ import {
   useDeleteTask,
 } from "@/lib/api/hooks/tasks";
 import type { ProjectTask } from "@/lib/api/types";
+import { useAuth } from "@/contexts/auth-context";
+import { hasRole, MANAGER_ROLES } from "@/lib/auth/roles";
 
 interface TaskListProps {
   projectId: string;
 }
 
 export function TaskList({ projectId }: TaskListProps) {
+  const { user } = useAuth();
+  const canManage = hasRole(MANAGER_ROLES, user?.role);
   const { data: tasks } = useProjectTasks(projectId);
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
@@ -75,6 +79,7 @@ export function TaskList({ projectId }: TaskListProps) {
         <Button
           variant="ghost"
           size="xs"
+          className={canManage ? undefined : "hidden"}
           onClick={() => setIsAdding(true)}
         >
           <Plus className="h-3.5 w-3.5" />
@@ -166,7 +171,7 @@ export function TaskList({ projectId }: TaskListProps) {
                   </span>
                 )}
               </div>
-              <div className="flex gap-1">
+              <div className={canManage ? "flex gap-1" : "hidden"}>
                 <Button
                   variant="ghost"
                   size="xs"
