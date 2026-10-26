@@ -19,6 +19,7 @@ This file captures the current operating posture of the repository. It is not th
 - Added stale timer recovery: a `time_entries.last_seen_at` heartbeat, a gap-derived `time_entries.last_session_end_at` recovery point, plus a prompt when a timer is found running from a previous day.
 - Moved local phase issue files into the specs archive.
 - Added GitHub Issue templates for bugs, features, and maintenance work.
+- Security hardening from the 2026-10-26 audit: server-side role enforcement per the permissions matrix, per-request session revalidation, Member scoping to own entries, cross-account id checks, shared-link scoping, invite and Owner-role rules, CSV formula escaping, no default `NEXTAUTH_SECRET` in Docker files, and `next` 16.4.3 plus dependency overrides for audit findings.
 
 ## Validation Snapshot
 
@@ -37,6 +38,10 @@ Latest local checks from the repository root:
 
 - Run a deliberate final readiness gate after the current restructuring settles.
 - Create GitHub Issues for any remaining production-hardening work that should continue beyond this cleanup.
+- Login has no rate limit; add a Vercel Firewall rule on `/api/auth/callback/credentials`.
+- Email uniqueness is enforced in the registration routes only; a unique index on `lower(email)` needs a migration after checking production for duplicates.
+- Viewers still see the tracker UI; the API rejects their writes with 403.
+- `pnpm audit` keeps one high finding: `zod` 3 inside the `shadcn` CLI. No patched 3.x exists and forcing zod 4 breaks the CLI. It never runs in the app.
 
 ## Notes For Agents
 

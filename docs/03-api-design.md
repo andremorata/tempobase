@@ -32,6 +32,15 @@
 | `Content-Type: application/json` | For JSON bodies | Standard request body format |
 | Auth.js session cookie | For protected routes | Sent automatically by the browser |
 
+### Authorization
+
+- Every request re-reads the user from the database in the Auth.js `jwt` callback. Removal, deactivation, role changes and password changes apply immediately; a password change signs out every session.
+- Handlers enforce the permissions matrix in `docs/05-business-rules.md` with `requireRole` and the helpers in `app/src/lib/auth/helpers.ts` (`requireManager`, `requireTracker`, `requireOwnerOrAdmin`, `requireOwner`). Role groups live in `app/src/lib/auth/roles.ts`.
+- Members only read and write their own time entries; `applyAccessFilter` in `app/src/lib/auth/access.ts` scopes lists and reports. Managers and above write other users' entries.
+- Ids received in a body (project, task, tag, client) are checked against the caller's account with `refsBelongToAccount`.
+- Public shared reports apply the creator's current scope and amounts permission at view time.
+- Auth failures return 401/403 through `authErrorResponse`, not 500.
+
 ## 3. Resource Conventions
 
 - Base path: `/api/{resource}`

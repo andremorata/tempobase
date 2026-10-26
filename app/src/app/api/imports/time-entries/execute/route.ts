@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId, getCurrentUserId } from "@/lib/auth/helpers";
+import { requireOwnerOrAdmin, getCurrentTenantId, getCurrentUserId, authErrorResponse } from "@/lib/auth/helpers";
 
 const ImportRowSchema = z.object({
   rowIndex: z.number().int(),
@@ -33,7 +33,7 @@ type StoredImportPreviewRow = {
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAuth();
+    await requireOwnerOrAdmin();
     const accountId = await getCurrentTenantId();
     const userId = await getCurrentUserId();
 
@@ -218,6 +218,9 @@ export async function POST(request: NextRequest) {
       skippedRows,
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Execute import error:", error);
 
     if (error instanceof z.ZodError) {

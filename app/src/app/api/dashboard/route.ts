@@ -7,7 +7,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { toNumber } from "@/lib/db/decimal";
-import { requireAuth, getCurrentTenantId, getCurrentUser } from "@/lib/auth/helpers";
+import { requireAuth, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
 import { getMemberAccess } from "@/lib/auth/access";
 
 export async function GET() {
@@ -17,10 +17,11 @@ export async function GET() {
     const currentUser = await getCurrentUser();
     const access = await getMemberAccess(currentUser.id, accountId, currentUser.role);
 
-    // Build a reusable project restriction clause for time-entry queries
-    const projectRestriction = access.projectIds !== null
-      ? { projectId: { in: access.projectIds } }
-      : {};
+    // Build a reusable owner/project restriction clause for time-entry queries
+    const entryRestriction = {
+      ...(access.projectIds !== null ? { projectId: { in: access.projectIds } } : {}),
+      ...(access.userId !== null ? { userId: access.userId } : {}),
+    };
 
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -49,7 +50,7 @@ export async function GET() {
           gte: weekStart,
           lte: weekEnd,
         },
-        ...projectRestriction,
+        ...entryRestriction,
       },
       select: {
         durationDecimal: true,
@@ -107,7 +108,7 @@ export async function GET() {
           gte: last7Start,
           lte: today,
         },
-        ...projectRestriction,
+        ...entryRestriction,
       },
       select: {
         entryDate: true,
@@ -141,8 +142,8 @@ export async function GET() {
       if (existing) {
         existing.hours += toNumber(entry.durationDecimal);
       } else {
-        const project = await prisma.project.findUnique({
-          where: { id: entry.projectId },
+        const project = await prisma.project.findFirst({
+          where: { id: entry.projectId, accountId },
           select: { name: true, color: true },
         });
 
@@ -171,7 +172,7 @@ export async function GET() {
       where: {
         accountId,
         isDeleted: false,
-        ...projectRestriction,
+        ...entryRestriction,
       },
       include: {
         project: {
@@ -207,6 +208,9 @@ export async function GET() {
       recentEntries: recentEntriesFormatted,
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Dashboard error:", error);
     return NextResponse.json(
       { error: "Failed to fetch dashboard data" },

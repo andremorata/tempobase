@@ -11,7 +11,8 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { toNumber } from "@/lib/db/decimal";
-import { requireAuth, getCurrentTenantId } from "@/lib/auth/helpers";
+import { requireManager, requireAuth, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
+import { canSeeRates, getMemberAccess, isProjectAccessible, isTaskAccessible } from "@/lib/auth/access";
 
 const UpdateTaskSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -52,7 +53,10 @@ export async function GET(
       },
     });
 
-    if (!task) {
+    const currentUser = await getCurrentUser();
+    const access = await getMemberAccess(currentUser.id, accountId, currentUser.role);
+
+    if (!task || !isProjectAccessible(access, projectId) || !isTaskAccessible(access, task.id)) {
       return NextResponse.json(
         { error: "Task not found" },
         { status: 404 }
@@ -64,11 +68,14 @@ export async function GET(
       projectId: task.projectId,
       name: task.name,
       isActive: task.isActive,
-      hourlyRate: task.hourlyRate === null ? null : toNumber(task.hourlyRate),
+      hourlyRate: task.hourlyRate === null || !canSeeRates(currentUser) ? null : toNumber(task.hourlyRate),
       createdAt: task.createdAt,
       updatedAt: task.updatedAt,
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Get task error:", error);
     return NextResponse.json(
       { error: "Failed to fetch task" },
@@ -83,7 +90,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string; taskId: string }> }
 ) {
   try {
-    await requireAuth();
+    await requireManager();
     const accountId = await getCurrentTenantId();
     const { id: projectId, taskId } = await params;
 
@@ -148,6 +155,9 @@ export async function PUT(
       updatedAt: task.updatedAt,
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Update task error:", error);
 
     if (error instanceof z.ZodError) {
@@ -170,7 +180,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; taskId: string }> }
 ) {
   try {
-    await requireAuth();
+    await requireManager();
     const accountId = await getCurrentTenantId();
     const { id: projectId, taskId } = await params;
 
@@ -217,6 +227,9 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Delete task error:", error);
     return NextResponse.json(
       { error: "Failed to delete task" },

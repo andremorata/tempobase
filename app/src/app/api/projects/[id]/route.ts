@@ -11,7 +11,8 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { toNumber } from "@/lib/db/decimal";
-import { requireAuth, getCurrentTenantId } from "@/lib/auth/helpers";
+import { requireManager, requireAuth, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
+import { canSeeRates, getMemberAccess, isProjectAccessible, refsBelongToAccount } from "@/lib/auth/access";
 
 const UpdateProjectSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -59,12 +60,17 @@ export async function GET(
       },
     });
 
-    if (!project) {
+    const currentUser = await getCurrentUser();
+    const access = await getMemberAccess(currentUser.id, accountId, currentUser.role);
+
+    if (!project || !isProjectAccessible(access, project.id)) {
       return NextResponse.json(
         { error: "Project not found" },
         { status: 404 }
       );
     }
+
+    const showRates = canSeeRates(currentUser);
 
     return NextResponse.json({
       id: project.id,
@@ -74,7 +80,7 @@ export async function GET(
       color: project.color,
       status: project.status,
       billingType: project.billingType,
-      hourlyRate: project.hourlyRate === null ? null : toNumber(project.hourlyRate),
+      hourlyRate: project.hourlyRate === null || !showRates ? null : toNumber(project.hourlyRate),
       budgetHours: project.budgetHours === null ? null : toNumber(project.budgetHours),
       isArchived: project.status === "Archived",
       createdAt: project.createdAt,
@@ -82,10 +88,13 @@ export async function GET(
       client: project.client,
       tasks: project.tasks.map((task) => ({
         ...task,
-        hourlyRate: task.hourlyRate === null ? null : toNumber(task.hourlyRate),
+        hourlyRate: task.hourlyRate === null || !showRates ? null : toNumber(task.hourlyRate),
       })),
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Get project error:", error);
     return NextResponse.json(
       { error: "Failed to fetch project" },
@@ -100,12 +109,16 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAuth();
+    await requireManager();
     const accountId = await getCurrentTenantId();
     const { id } = await params;
 
     const body = await request.json();
     const validated = UpdateProjectSchema.parse(body);
+
+    if (!(await refsBelongToAccount(accountId, { clientIds: [validated.clientId] }))) {
+      return NextResponse.json({ error: "Client not found" }, { status: 404 });
+    }
 
     // Check if project exists
     const existingProject = await prisma.project.findFirst({
@@ -192,6 +205,9 @@ export async function PUT(
       })),
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Update project error:", error);
 
     if (error instanceof z.ZodError) {
@@ -214,7 +230,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAuth();
+    await requireManager();
     const accountId = await getCurrentTenantId();
     const { id } = await params;
 
@@ -245,6 +261,9 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Delete project error:", error);
     return NextResponse.json(
       { error: "Failed to delete project" },

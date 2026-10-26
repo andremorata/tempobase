@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId, getCurrentUser } from "@/lib/auth/helpers";
+import { requireAuth, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
 import { createAuditLog } from "@/lib/audit/logger";
 import { summarizeTimeEntryAudit, toTimeEntryAuditSnapshot } from "../audit";
 import { mapTimeEntry } from "../mappers";
@@ -107,6 +107,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(mapTimeEntry(stoppedEntry));
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Stop timer error:", error);
 
     if (error instanceof z.ZodError) {

@@ -8,8 +8,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId, getCurrentUser } from "@/lib/auth/helpers";
-import { getMemberAccess } from "@/lib/auth/access";
+import { requireTracker, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
+import { getMemberAccess, MANAGER_ROLES } from "@/lib/auth/access";
 
 const BulkDeleteSchema = z.object({
   ids: z.array(z.string().uuid()).min(1),
@@ -17,7 +17,7 @@ const BulkDeleteSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAuth();
+    await requireTracker();
     const accountId = await getCurrentTenantId();
     const currentUser = await getCurrentUser();
     const access = await getMemberAccess(currentUser.id, accountId, currentUser.role);
@@ -31,6 +31,8 @@ export async function POST(request: NextRequest) {
       accountId,
       isDeleted: false,
       ...(access.projectIds !== null ? { projectId: { in: access.projectIds } } : {}),
+      // Only managers act on other users' entries
+      ...(MANAGER_ROLES.includes(currentUser.role) ? {} : { userId: currentUser.id }),
     };
 
     // Soft delete all entries
@@ -45,6 +47,9 @@ export async function POST(request: NextRequest) {
     // Return 204 No Content for successful delete operations
     return new NextResponse(null, { status: 204 });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Bulk delete error:", error);
 
     if (error instanceof z.ZodError) {

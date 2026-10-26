@@ -25,13 +25,14 @@ services:
         DATABASE_URL: postgresql://postgres:localdev@postgres:5432/tempobase
         DIRECT_DATABASE_URL: postgresql://postgres:localdev@postgres:5432/tempobase
         NEXTAUTH_URL: http://localhost:3000
-        NEXTAUTH_SECRET: change-me-in-production-use-openssl-rand-base64-32
     container_name: tempobase-app
     environment:
       DATABASE_URL: "postgresql://postgres:localdev@postgres:5432/tempobase"
       DIRECT_DATABASE_URL: "postgresql://postgres:localdev@postgres:5432/tempobase"
       NEXTAUTH_URL: "http://localhost:3000"
-      NEXTAUTH_SECRET: "change-me-in-production-use-openssl-rand-base64-32"
+      # No default: Auth.js refuses to sign sessions without a secret. Set it in .env
+      # (openssl rand -base64 32); a shared placeholder would let anyone forge sessions.
+      NEXTAUTH_SECRET: "${NEXTAUTH_SECRET:-}"
     ports:
       - "3000:3000"
     depends_on:

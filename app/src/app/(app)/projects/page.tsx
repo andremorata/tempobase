@@ -39,6 +39,8 @@ import type {
   BillingType,
 } from "@/lib/api/types";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/auth-context";
+import { hasRole, MANAGER_ROLES } from "@/lib/auth/roles";
 
 const STATUS_COLORS: Record<string, string> = {
   Active: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
@@ -47,6 +49,8 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function ProjectsPage() {
+  const { user } = useAuth();
+  const canManage = hasRole(MANAGER_ROLES, user?.role);
   const { data: projects, isLoading } = useProjects(true);
   const { data: clients } = useClients();
   const { data: profile } = useCurrentUserProfile();
@@ -157,10 +161,12 @@ export default function ProjectsPage() {
     <div className="mx-auto max-w-4xl space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
-        <Button onClick={openCreate} size="sm">
-          <Plus className="mr-1.5 h-4 w-4" />
-          Add project
-        </Button>
+        {canManage && (
+          <Button onClick={openCreate} size="sm">
+            <Plus className="mr-1.5 h-4 w-4" />
+            Add project
+          </Button>
+        )}
       </div>
 
       {isLoading && (
@@ -218,7 +224,7 @@ export default function ProjectsPage() {
                 >
                   {project.status}
                 </Badge>
-                <div className="flex gap-1">
+                <div className={canManage ? "flex gap-1" : "hidden"}>
                   <Button
                     variant="ghost"
                     size="xs"

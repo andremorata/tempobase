@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId } from "@/lib/auth/helpers";
+import { requireTracker, requireAuth, getCurrentTenantId, authErrorResponse } from "@/lib/auth/helpers";
 
 // ─── List Tags ────────────────────────────────────────────────────────────
 
@@ -38,6 +38,9 @@ export async function GET() {
       }))
     );
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("List tags error:", error);
     return NextResponse.json(
       { error: "Failed to fetch tags" },
@@ -55,7 +58,7 @@ const CreateTagSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAuth();
+    await requireTracker();
     const accountId = await getCurrentTenantId();
 
     const body = await request.json();
@@ -81,6 +84,9 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Create tag error:", error);
 
     if (error instanceof z.ZodError) {

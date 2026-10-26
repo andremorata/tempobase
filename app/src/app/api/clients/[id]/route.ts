@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId } from "@/lib/auth/helpers";
+import { requireManager, requireAuth, getCurrentTenantId, authErrorResponse } from "@/lib/auth/helpers";
 
 const UpdateClientSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -69,6 +69,9 @@ export async function GET(
       projects: client.projects,
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Get client error:", error);
     return NextResponse.json(
       { error: "Failed to fetch client" },
@@ -83,7 +86,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAuth();
+    await requireManager();
     const accountId = await getCurrentTenantId();
     const { id } = await params;
 
@@ -155,6 +158,9 @@ export async function PUT(
       projects: client.projects,
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Update client error:", error);
 
     if (error instanceof z.ZodError) {
@@ -177,7 +183,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAuth();
+    await requireManager();
     const accountId = await getCurrentTenantId();
     const { id } = await params;
 
@@ -208,6 +214,9 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Delete client error:", error);
     return NextResponse.json(
       { error: "Failed to delete client" },

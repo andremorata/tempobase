@@ -51,6 +51,7 @@ import { ApiError, getApiErrorMessage } from "@/lib/api/client";
 import { toast } from "sonner";
 
 import { roundUpToTenMin } from "@/lib/reports/rounding";
+import { csvCell } from "@/lib/format";
 import {
   type ChartGranularity,
   CHART_GRANULARITIES,
@@ -629,7 +630,7 @@ function SummaryTab({
     const rows = displayEntries
       .map(
         (e) =>
-          `"${e.entryDate.slice(0, 7)}","${e.entryDate}","${e.projectName ?? ""}","${e.clientName ?? ""}","${e.taskName ?? ""}","${e.description ?? ""}",${e.durationDecimal?.toFixed(2) ?? ""},${e.isBillable},${e.billedAmount != null ? e.billedAmount.toFixed(2) : ""}`
+          `"${e.entryDate.slice(0, 7)}","${e.entryDate}",${csvCell(e.projectName)},${csvCell(e.clientName)},${csvCell(e.taskName)},${csvCell(e.description)},${e.durationDecimal?.toFixed(2) ?? ""},${e.isBillable},${e.billedAmount != null ? e.billedAmount.toFixed(2) : ""}`
       )
       .join("\n");
     const blob = new Blob([header + rows], { type: "text/csv" });
@@ -1009,7 +1010,7 @@ function DetailedTab({ filters }: { filters: FilterState }) {
     const rows = entries
       .map(
         (e) =>
-          `"${e.entryDate}","${e.projectName ?? ""}","${e.clientName ?? ""}","${e.taskName ?? ""}","${e.description ?? ""}","${e.startTime}","${e.endTime ?? ""}",${e.durationDecimal?.toFixed(2) ?? ""},${e.isBillable},${e.billedAmount != null ? e.billedAmount.toFixed(2) : ""}`
+          `"${e.entryDate}",${csvCell(e.projectName)},${csvCell(e.clientName)},${csvCell(e.taskName)},${csvCell(e.description)},"${e.startTime}","${e.endTime ?? ""}",${e.durationDecimal?.toFixed(2) ?? ""},${e.isBillable},${e.billedAmount != null ? e.billedAmount.toFixed(2) : ""}`
       )
       .join("\n");
     const blob = new Blob([header + rows], { type: "text/csv" });

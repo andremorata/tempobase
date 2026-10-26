@@ -59,6 +59,7 @@ const accountItems = [
 export function AppSidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
+  // Audit and CSV import are Owner/Admin only on the server too
   const canViewAudit = user?.role === "Owner" || user?.role === "Admin";
 
   return (
@@ -134,25 +135,27 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <SidebarGroup>
-          <SidebarGroupLabel>Data</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {dataItems.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    isActive={pathname === item.href}
-                    tooltip={item.title}
-                    render={<Link href={item.href} />}
-                  >
-                    <item.icon className="h-4 w-4" />
-                    <span>{item.title}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {canViewAudit && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Data</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {dataItems.map((item) => (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      isActive={pathname === item.href}
+                      tooltip={item.title}
+                      render={<Link href={item.href} />}
+                    >
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
         <SidebarGroup>
           <SidebarGroupLabel>Account</SidebarGroupLabel>

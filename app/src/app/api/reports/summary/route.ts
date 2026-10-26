@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { toNumber } from "@/lib/db/decimal";
-import { requireAuth, getCurrentTenantId, getCurrentUser } from "@/lib/auth/helpers";
+import { requireAuth, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
 import { getMemberAccess, applyAccessFilter } from "@/lib/auth/access";
 import { toSummaryReportGroupBy } from "@/lib/reports/group-by";
 import { roundUpToTenMin } from "@/lib/reports/rounding";
@@ -74,8 +74,8 @@ export async function GET(request: NextRequest) {
       where.entryDate = entryDate;
     }
 
-    // Apply project/task access restrictions (intersects with any caller-supplied filters)
-    applyAccessFilter(where, access, query.projectId, query.taskId);
+    // Apply user/project/task access restrictions (intersects with any caller-supplied filters)
+    applyAccessFilter(where, access, query.projectId, query.taskId, query.userId);
 
     if (query.clientId) {
       where.project = {
@@ -89,10 +89,6 @@ export async function GET(request: NextRequest) {
           tagId: query.tagId,
         },
       };
-    }
-
-    if (query.userId) {
-      where.userId = query.userId;
     }
 
     if (query.billable === "true") {
@@ -247,6 +243,9 @@ export async function GET(request: NextRequest) {
       totalEntries: totals.entryCount,
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Summary report error:", error);
 
     if (error instanceof z.ZodError) {

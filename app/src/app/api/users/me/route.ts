@@ -8,7 +8,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentUserId } from "@/lib/auth/helpers";
+import { requireAuth, getCurrentTenantId, getCurrentUserId, authErrorResponse } from "@/lib/auth/helpers";
+import { refsBelongToAccount } from "@/lib/auth/access";
 
 // ─── Get Current User Profile ────────────────────────────────────────────
 
@@ -42,6 +43,9 @@ export async function GET() {
 
     return NextResponse.json(user);
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Get user profile error:", error);
     return NextResponse.json(
       { error: "Failed to fetch user profile" },
@@ -68,6 +72,11 @@ export async function PUT(request: NextRequest) {
 
     const body = await request.json();
     const validated = UpdateProfileSchema.parse(body);
+
+    const accountId = await getCurrentTenantId();
+    if (!(await refsBelongToAccount(accountId, { projectIds: [validated.defaultProjectId] }))) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
 
     const user = await prisma.user.update({
       where: { id: userId },
@@ -96,6 +105,9 @@ export async function PUT(request: NextRequest) {
 
     return NextResponse.json(user);
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Update user profile error:", error);
 
     if (error instanceof z.ZodError) {

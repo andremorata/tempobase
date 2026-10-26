@@ -59,10 +59,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if user already exists in this account
+    // Emails are unique across workspaces, same as /api/auth/register. A duplicate in
+    // another workspace would make sign-in ambiguous for the original owner of the email.
     const existingUser = await prisma.user.findFirst({
       where: {
-        accountId: invite.accountId,
         email: emailLower,
         isDeleted: false,
       },
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
 
     if (existingUser) {
       return NextResponse.json(
-        { error: "User already exists in this account" },
+        { error: "Email already registered" },
         { status: 409 }
       );
     }
@@ -80,6 +80,15 @@ export async function POST(request: NextRequest) {
 
     // Create user and mark invite as used in transaction
     const result = await prisma.$transaction(async (tx) => {
+      // Claim the invite atomically so two concurrent requests cannot both use it
+      const claimed = await tx.accountInvite.updateMany({
+        where: { id: invite.id, usedAt: null, isDeleted: false },
+        data: { usedAt: new Date() },
+      });
+      if (claimed.count !== 1) {
+        return null;
+      }
+
       const user = await tx.user.create({
         data: {
           accountId: invite.accountId,
@@ -92,15 +101,15 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      await tx.accountInvite.update({
-        where: { id: invite.id },
-        data: {
-          usedAt: new Date(),
-        },
-      });
-
       return { user };
     });
+
+    if (!result) {
+      return NextResponse.json(
+        { error: "Invite token has already been used" },
+        { status: 410 }
+      );
+    }
 
     return NextResponse.json(
       {

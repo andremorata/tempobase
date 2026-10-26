@@ -9,7 +9,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import type { ReportGroupByInput } from "@/lib/api/types";
-import { requireAuth, getCurrentTenantId } from "@/lib/auth/helpers";
+import { requireAuth, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
+import { MANAGER_ROLES } from "@/lib/auth/access";
 import { toPersistedReportGroupBy } from "@/lib/reports/group-by";
 import type { ChartGranularity } from "@/lib/reports/granularity";
 
@@ -76,6 +77,7 @@ export async function PUT(
   try {
     await requireAuth();
     const accountId = await getCurrentTenantId();
+    const currentUser = await getCurrentUser();
     const { id } = await params;
 
     const body = await request.json();
@@ -85,10 +87,14 @@ export async function PUT(
     // Check if report exists
     const existingReport = await prisma.savedReport.findUnique({
       where: { id },
-      select: { accountId: true },
+      select: { accountId: true, createdByUserId: true },
     });
 
-    if (!existingReport || existingReport.accountId !== accountId) {
+    if (
+      !existingReport ||
+      existingReport.accountId !== accountId ||
+      (existingReport.createdByUserId !== currentUser.id && !MANAGER_ROLES.includes(currentUser.role))
+    ) {
       return NextResponse.json(
         { error: "Saved report not found" },
         { status: 404 }
@@ -152,6 +158,9 @@ export async function PUT(
       updatedAt: report.updatedAt || report.createdAt,
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Update saved report error:", error);
 
     if (error instanceof z.ZodError) {
@@ -175,15 +184,20 @@ export async function DELETE(
   try {
     await requireAuth();
     const accountId = await getCurrentTenantId();
+    const currentUser = await getCurrentUser();
     const { id } = await params;
 
     // Check if report exists
     const existingReport = await prisma.savedReport.findUnique({
       where: { id },
-      select: { accountId: true },
+      select: { accountId: true, createdByUserId: true },
     });
 
-    if (!existingReport || existingReport.accountId !== accountId) {
+    if (
+      !existingReport ||
+      existingReport.accountId !== accountId ||
+      (existingReport.createdByUserId !== currentUser.id && !MANAGER_ROLES.includes(currentUser.role))
+    ) {
       return NextResponse.json(
         { error: "Saved report not found" },
         { status: 404 }
@@ -197,6 +211,9 @@ export async function DELETE(
 
     return new NextResponse(null, { status: 204 });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Delete saved report error:", error);
     return NextResponse.json(
       { error: "Failed to delete saved report" },

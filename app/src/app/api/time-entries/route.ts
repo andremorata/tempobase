@@ -10,8 +10,8 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { withTenant } from "@/lib/db/extensions";
-import { requireAuth, getCurrentTenantId, getCurrentUser } from "@/lib/auth/helpers";
-import { getMemberAccess, applyAccessFilter, isProjectAccessible, isTaskAccessible } from "@/lib/auth/access";
+import { requireAuth, requireTracker, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
+import { getMemberAccess, applyAccessFilter, isProjectAccessible, isTaskAccessible, refsBelongToAccount } from "@/lib/auth/access";
 import { createAuditLog } from "@/lib/audit/logger";
 import { mapTimeEntry } from "./mappers";
 import { summarizeTimeEntryAudit, toTimeEntryAuditSnapshot } from "./audit";
@@ -56,12 +56,8 @@ export async function GET(request: NextRequest) {
       ...(query.from || query.to ? { entryDate } : {}),
     };
 
-    if (query.userId) {
-      where.userId = query.userId;
-    }
-
-    // Apply project/task access restrictions (intersects with any caller-supplied filters)
-    applyAccessFilter(where, access, query.projectId, query.taskId);
+    // Apply user/project/task access restrictions (intersects with any caller-supplied filters)
+    applyAccessFilter(where, access, query.projectId, query.taskId, query.userId);
 
     const entries = await db.timeEntry.findMany({
       where,
@@ -84,6 +80,9 @@ export async function GET(request: NextRequest) {
     // Return array directly to match frontend contract
     return NextResponse.json(entries.map(mapTimeEntry));
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("List time entries error:", error);
 
     if (error instanceof z.ZodError) {
@@ -114,7 +113,7 @@ const CreateTimeEntrySchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAuth();
+    await requireTracker();
     const accountId = await getCurrentTenantId();
     const user = await getCurrentUser();
     const userId = user.id;
@@ -129,6 +128,13 @@ export async function POST(request: NextRequest) {
     }
     if (!isTaskAccessible(access, validated.taskId)) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
+    if (!(await refsBelongToAccount(accountId, {
+      projectIds: [validated.projectId],
+      taskIds: [validated.taskId],
+      tagIds: validated.tagIds,
+    }))) {
+      return NextResponse.json({ error: "Project, task or tag not found" }, { status: 404 });
     }
 
     const startTime = new Date(validated.startTime);
@@ -215,6 +221,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(mapTimeEntry(entry), { status: 201 });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Create time entry error:", error);
 
     if (error instanceof z.ZodError) {

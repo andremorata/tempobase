@@ -23,9 +23,13 @@ import {
   useDeleteClient,
 } from "@/lib/api/hooks/clients";
 import { formatDate } from "@/lib/format";
+import { useAuth } from "@/contexts/auth-context";
+import { hasRole, MANAGER_ROLES } from "@/lib/auth/roles";
 import type { Client, CreateClientRequest } from "@/lib/api/types";
 
 export default function ClientsPage() {
+  const { user } = useAuth();
+  const canManage = hasRole(MANAGER_ROLES, user?.role);
   const { data: clients, isLoading } = useClients();
   const createClient = useCreateClient();
   const updateClient = useUpdateClient();
@@ -111,7 +115,7 @@ export default function ClientsPage() {
     {
       id: "actions",
       header: "",
-      cell: ({ row }) => (
+      cell: ({ row }) => canManage && (
         <div className="flex justify-end gap-1">
           <Button
             variant="ghost"
@@ -136,10 +140,12 @@ export default function ClientsPage() {
     <div className="mx-auto max-w-4xl space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Clients</h1>
-        <Button onClick={openCreate} size="sm">
-          <Plus className="mr-1.5 h-4 w-4" />
-          Add client
-        </Button>
+        {canManage && (
+          <Button onClick={openCreate} size="sm">
+            <Plus className="mr-1.5 h-4 w-4" />
+            Add client
+          </Button>
+        )}
       </div>
 
       <DataTable

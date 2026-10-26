@@ -10,8 +10,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId, getCurrentUser } from "@/lib/auth/helpers";
-import { getMemberAccess, isProjectAccessible, isTaskAccessible } from "@/lib/auth/access";
+import { requireAuth, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
+import {
+  canModifyEntry,
+  getMemberAccess,
+  isEntryVisible,
+  isProjectAccessible,
+  isTaskAccessible,
+  refsBelongToAccount,
+} from "@/lib/auth/access";
 import { createAuditLog } from "@/lib/audit/logger";
 import { summarizeTimeEntryAudit, toTimeEntryAuditSnapshot } from "../audit";
 
@@ -69,8 +76,8 @@ export async function GET(
       );
     }
 
-    // Enforce access restrictions on the entry's project/task
-    if (!isProjectAccessible(access, entry.projectId)) {
+    // Enforce access restrictions on the entry's owner/project/task
+    if (!isEntryVisible(access, entry.userId) || !isProjectAccessible(access, entry.projectId)) {
       return NextResponse.json({ error: "Time entry not found" }, { status: 404 });
     }
     if (!isTaskAccessible(access, entry.taskId)) {
@@ -118,6 +125,9 @@ export async function GET(
       })),
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Get time entry error:", error);
     return NextResponse.json(
       { error: "Failed to fetch time entry" },
@@ -158,14 +168,24 @@ export async function PUT(
     }
 
     // Enforce access: the existing entry and any new project/task must be accessible
-    if (!isProjectAccessible(access, existingEntry.projectId)) {
+    if (!isEntryVisible(access, existingEntry.userId) || !isProjectAccessible(access, existingEntry.projectId)) {
       return NextResponse.json({ error: "Time entry not found" }, { status: 404 });
+    }
+    if (!canModifyEntry(currentUser, existingEntry.userId)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     if (validated.projectId !== undefined && !isProjectAccessible(access, validated.projectId)) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
     if (validated.taskId !== undefined && !isTaskAccessible(access, validated.taskId)) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
+    if (!(await refsBelongToAccount(accountId, {
+      projectIds: [validated.projectId],
+      taskIds: [validated.taskId],
+      tagIds: validated.tagIds,
+    }))) {
+      return NextResponse.json({ error: "Project, task or tag not found" }, { status: 404 });
     }
 
     // Cannot update running timer times
@@ -333,6 +353,9 @@ export async function PUT(
       })),
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Update time entry error:", error);
 
     if (error instanceof z.ZodError) {
@@ -378,8 +401,11 @@ export async function DELETE(
     }
 
     // Enforce access restrictions
-    if (!isProjectAccessible(access, entry.projectId)) {
+    if (!isEntryVisible(access, entry.userId) || !isProjectAccessible(access, entry.projectId)) {
       return NextResponse.json({ error: "Time entry not found" }, { status: 404 });
+    }
+    if (!canModifyEntry(currentUser, entry.userId)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     // Soft delete
@@ -406,6 +432,9 @@ export async function DELETE(
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Delete time entry error:", error);
     return NextResponse.json(
       { error: "Failed to delete time entry" },

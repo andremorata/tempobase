@@ -75,3 +75,13 @@ export function formatTime(dateStr: string): string {
     hour12: false,
   });
 }
+
+/**
+ * Quotes a value for a CSV cell. Doubles embedded quotes and prefixes a leading
+ * = + - @ tab or CR with ' so spreadsheet apps don't run it as a formula.
+ */
+export function csvCell(value: string | null | undefined): string {
+  const text = value ?? "";
+  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return `"${safe.replace(/"/g, '""')}"`;
+}

@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId } from "@/lib/auth/helpers";
+import { requireManager, requireAuth, getCurrentTenantId, authErrorResponse } from "@/lib/auth/helpers";
 
 // ─── List Clients ─────────────────────────────────────────────────────────
 
@@ -53,6 +53,9 @@ export async function GET() {
       }))
     );
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("List clients error:", error);
     return NextResponse.json(
       { error: "Failed to fetch clients" },
@@ -72,7 +75,7 @@ const CreateClientSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAuth();
+    await requireManager();
     const accountId = await getCurrentTenantId();
 
     const body = await request.json();
@@ -104,6 +107,9 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Create client error:", error);
 
     if (error instanceof z.ZodError) {

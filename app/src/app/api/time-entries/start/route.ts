@@ -7,8 +7,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId, getCurrentUser } from "@/lib/auth/helpers";
-import { getMemberAccess, isProjectAccessible, isTaskAccessible } from "@/lib/auth/access";
+import { requireTracker, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
+import { getMemberAccess, isProjectAccessible, isTaskAccessible, refsBelongToAccount } from "@/lib/auth/access";
 import { createAuditLog } from "@/lib/audit/logger";
 import { summarizeTimeEntryAudit, toTimeEntryAuditSnapshot } from "../audit";
 import { mapTimeEntry } from "../mappers";
@@ -22,7 +22,7 @@ const StartTimerSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAuth();
+    await requireTracker();
     const accountId = await getCurrentTenantId();
     const currentUser = await getCurrentUser();
     const userId = currentUser.id;
@@ -37,6 +37,12 @@ export async function POST(request: NextRequest) {
     }
     if (!isTaskAccessible(access, validated.taskId)) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
+    if (!(await refsBelongToAccount(accountId, {
+      projectIds: [validated.projectId],
+      taskIds: [validated.taskId],
+    }))) {
+      return NextResponse.json({ error: "Project or task not found" }, { status: 404 });
     }
 
     // Check if there's already a running timer
@@ -102,6 +108,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(mapTimeEntry(entry), { status: 201 });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Start timer error:", error);
 
     if (error instanceof z.ZodError) {

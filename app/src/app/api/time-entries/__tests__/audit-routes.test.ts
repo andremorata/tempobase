@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const authMock = vi.hoisted(() => ({
   requireAuth: vi.fn(),
+  requireTracker: vi.fn(),
+  authErrorResponse: vi.fn(() => null),
   getCurrentTenantId: vi.fn(),
   getCurrentUser: vi.fn(),
   getCurrentUserId: vi.fn(),
@@ -13,6 +15,9 @@ const accessMock = vi.hoisted(() => ({
   applyAccessFilter: vi.fn(),
   isProjectAccessible: vi.fn(),
   isTaskAccessible: vi.fn(),
+  isEntryVisible: vi.fn(),
+  canModifyEntry: vi.fn(),
+  refsBelongToAccount: vi.fn(),
 }));
 
 const auditMock = vi.hoisted(() => ({
@@ -110,6 +115,9 @@ describe("time-entry audit routes", () => {
     accessMock.getMemberAccess.mockResolvedValue({ projectIds: null, taskIds: null });
     accessMock.isProjectAccessible.mockReturnValue(true);
     accessMock.isTaskAccessible.mockReturnValue(true);
+    accessMock.isEntryVisible.mockReturnValue(true);
+    accessMock.canModifyEntry.mockReturnValue(true);
+    accessMock.refsBelongToAccount.mockResolvedValue(true);
     withTenantMock.mockImplementation((db) => db);
 
     prismaMock.prisma.$transaction.mockImplementation(async (callback: unknown) => {

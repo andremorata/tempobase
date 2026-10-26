@@ -5,8 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId, getCurrentUser } from "@/lib/auth/helpers";
-import { getMemberAccess, isProjectAccessible } from "@/lib/auth/access";
+import { requireAuth, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
+import { canModifyEntry, getMemberAccess, isEntryVisible, isProjectAccessible } from "@/lib/auth/access";
 import { mapTimeEntry } from "../../mappers";
 
 const AdjustStartTimeSchema = z.object({
@@ -43,8 +43,11 @@ export async function PATCH(
     }
 
     // Enforce access restrictions
-    if (!isProjectAccessible(access, entry.projectId)) {
+    if (!isEntryVisible(access, entry.userId) || !isProjectAccessible(access, entry.projectId)) {
       return NextResponse.json({ error: "Time entry not found" }, { status: 404 });
+    }
+    if (!canModifyEntry(currentUser, entry.userId)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     if (!entry.isRunning) {
@@ -90,6 +93,9 @@ export async function PATCH(
 
     return NextResponse.json(mapTimeEntry(updated));
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Adjust start time error:", error);
 
     if (error instanceof z.ZodError) {

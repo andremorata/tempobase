@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireAuth, getCurrentTenantId } from "@/lib/auth/helpers";
+import { requireTracker, requireAuth, getCurrentTenantId, authErrorResponse } from "@/lib/auth/helpers";
 
 const UpdateTagSchema = z.object({
   name: z.string().min(1).max(50).optional(),
@@ -51,6 +51,9 @@ export async function GET(
       updatedAt: tag.updatedAt,
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Get tag error:", error);
     return NextResponse.json(
       { error: "Failed to fetch tag" },
@@ -65,7 +68,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAuth();
+    await requireTracker();
     const accountId = await getCurrentTenantId();
     const { id } = await params;
 
@@ -113,6 +116,9 @@ export async function PUT(
       updatedAt: tag.updatedAt,
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Update tag error:", error);
 
     if (error instanceof z.ZodError) {
@@ -135,7 +141,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAuth();
+    await requireTracker();
     const accountId = await getCurrentTenantId();
     const { id } = await params;
 
@@ -166,6 +172,9 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Delete tag error:", error);
     return NextResponse.json(
       { error: "Failed to delete tag" },

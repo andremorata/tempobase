@@ -10,7 +10,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { toNumber } from "@/lib/db/decimal";
 import { Prisma } from "@prisma/client";
-import { requireAuth, getCurrentTenantId, getCurrentUser } from "@/lib/auth/helpers";
+import { requireManager, requireAuth, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
+import { canSeeRates } from "@/lib/auth/access";
 
 // ─── List Tasks ───────────────────────────────────────────────────────────
 
@@ -73,18 +74,23 @@ export async function GET(
       },
     });
 
+    const showRates = canSeeRates(currentUser);
+
     return NextResponse.json(
       tasks.map((t) => ({
         id: t.id,
         projectId: t.projectId,
         name: t.name,
         isActive: t.isActive,
-        hourlyRate: t.hourlyRate === null ? null : toNumber(t.hourlyRate),
+        hourlyRate: t.hourlyRate === null || !showRates ? null : toNumber(t.hourlyRate),
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
       }))
     );
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("List tasks error:", error);
     return NextResponse.json(
       { error: "Failed to fetch tasks" },
@@ -105,7 +111,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAuth();
+    await requireManager();
     const accountId = await getCurrentTenantId();
     const { id: projectId } = await params;
 
@@ -150,6 +156,9 @@ export async function POST(
       { status: 201 }
     );
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Create task error:", error);
 
     if (error instanceof z.ZodError) {

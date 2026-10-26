@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import type { ReportGroupByInput } from "@/lib/api/types";
-import { requireAuth, getCurrentTenantId, getCurrentUserId } from "@/lib/auth/helpers";
+import { requireAuth, getCurrentTenantId, getCurrentUserId, authErrorResponse } from "@/lib/auth/helpers";
 import { toPersistedReportGroupBy } from "@/lib/reports/group-by";
 import type { ChartGranularity } from "@/lib/reports/granularity";
 
@@ -118,6 +118,9 @@ export async function GET() {
 
     return NextResponse.json(reportsWithFilters);
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("List saved reports error:", error);
     return NextResponse.json(
       { error: "Failed to list saved reports" },
@@ -196,6 +199,9 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
+
     console.error("Create saved report error:", error);
 
     if (error instanceof z.ZodError) {

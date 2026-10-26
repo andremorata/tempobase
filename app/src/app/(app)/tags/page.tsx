@@ -23,8 +23,12 @@ import {
 } from "@/lib/api/hooks/tags";
 import { formatDate } from "@/lib/format";
 import type { Tag, CreateTagRequest } from "@/lib/api/types";
+import { useAuth } from "@/contexts/auth-context";
+import { hasRole, TRACKER_ROLES } from "@/lib/auth/roles";
 
 export default function TagsPage() {
+  const { user } = useAuth();
+  const canManage = hasRole(TRACKER_ROLES, user?.role);
   const { data: tags, isLoading } = useTags();
   const createTag = useCreateTag();
   const updateTag = useUpdateTag();
@@ -98,7 +102,7 @@ export default function TagsPage() {
     {
       id: "actions",
       header: "",
-      cell: ({ row }) => (
+      cell: ({ row }) => canManage && (
         <div className="flex justify-end gap-1">
           <Button
             variant="ghost"
@@ -123,10 +127,12 @@ export default function TagsPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Tags</h1>
-        <Button onClick={openCreate} size="sm">
-          <Plus className="mr-1.5 h-4 w-4" />
-          Add tag
-        </Button>
+        {canManage && (
+          <Button onClick={openCreate} size="sm">
+            <Plus className="mr-1.5 h-4 w-4" />
+            Add tag
+          </Button>
+        )}
       </div>
 
       <DataTable
