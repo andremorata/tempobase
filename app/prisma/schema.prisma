@@ -1,4 +1,4 @@
-// TempoBase Lite - Prisma Schema
+// TempoBase - Prisma Schema
 
 generator client {
   provider = "prisma-client-js"

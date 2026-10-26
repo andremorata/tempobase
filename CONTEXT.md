@@ -1,4 +1,4 @@
-# TempoBase Lite
+# TempoBase
 
 Time tracking product. This glossary captures domain terms whose meaning is not obvious from the code alone.
 

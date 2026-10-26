@@ -1,6 +1,6 @@
-# TempoBase Lite — Product Baseline
+# TempoBase — Product Baseline
 
-TempoBase Lite is a full-stack time tracking product for small teams and client-facing work reporting. The active application lives in `app/` and is deployed as a Next.js app backed by PostgreSQL.
+TempoBase is a full-stack time tracking product for small teams and client-facing work reporting. The active application lives in `app/` and is deployed as a Next.js app backed by PostgreSQL.
 
 This file is stable product context, not an active task tracker. New work should be tracked in GitHub Issues and linked from PRs.
 

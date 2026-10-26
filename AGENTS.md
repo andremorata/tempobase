@@ -1,6 +1,6 @@
-# TempoBase Lite — Agent Instructions
+# TempoBase — Agent Instructions
 
-TempoBase Lite is a production-ready, full-stack time tracking application. It uses Next.js App Router for UI and backend Route Handlers, Prisma for PostgreSQL access, Auth.js for authentication, and Vercel + Neon for deployment.
+TempoBase is a production-ready, full-stack time tracking application. It uses Next.js App Router for UI and backend Route Handlers, Prisma for PostgreSQL access, Auth.js for authentication, and Vercel + Neon for deployment.
 
 These instructions are for AI agents working in this repository. Keep changes focused, verified, and aligned with the existing product.
 
@@ -21,7 +21,7 @@ These instructions are for AI agents working in this repository. Keep changes fo
 
 ## Core Rules
 
-- Treat this as the TempoBase Lite product, not a starter template.
+- Treat this as the TempoBase product, not a starter template.
 - Prefer existing patterns in `app/src/` over new abstractions.
 - Keep UI behavior, Route Handler contracts, Prisma access, and tests consistent with the docs.
 - Do not introduce legacy backend, Azure infra, or pre-rename path assumptions.

@@ -1,6 +1,6 @@
-# TempoBase Lite App
+# TempoBase App
 
-This package contains the full-stack TempoBase Lite application.
+This package contains the full-stack TempoBase application.
 
 ## Runtime Role
 
