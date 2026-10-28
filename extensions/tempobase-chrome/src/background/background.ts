@@ -1,8 +1,5 @@
 import { getRunningTimer, TempoBaseError } from '@/api/client';
 
-const BADGE_POLL_ALARM = 'tempobase-poll-running';
-const BADGE_POLL_INTERVAL_MINUTES = 0.25; // 15 seconds
-
 interface RunningTimerState {
   entryId: string | null;
   startTime: string | null;
@@ -94,28 +91,12 @@ async function refreshRunningTimer(): Promise<void> {
   }
 }
 
-async function setupAlarm(): Promise<void> {
-  const existing = await chrome.alarms.get(BADGE_POLL_ALARM);
-  if (existing) return;
-  await chrome.alarms.create(BADGE_POLL_ALARM, {
-    periodInMinutes: BADGE_POLL_INTERVAL_MINUTES,
-  });
-}
-
 chrome.runtime.onStartup.addListener(() => {
   void refreshRunningTimer();
-  void setupAlarm();
 });
 
 chrome.runtime.onInstalled.addListener(() => {
   void refreshRunningTimer();
-  void setupAlarm();
-});
-
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === BADGE_POLL_ALARM) {
-    void refreshRunningTimer();
-  }
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -141,6 +122,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
-// Initialize immediately on load in case the event is long-lived.
+// The popup pushes state on open and on start/stop, so there is no periodic poll:
+// every background refresh here is triggered by the user, not by a timer.
+// NOTE: no alarm means the icon can be stale if a timer starts on another device.
+// Opening the popup resyncs it.
 void refreshRunningTimer();
-void setupAlarm();

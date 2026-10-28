@@ -67,6 +67,14 @@ export function Popup() {
       setProjects(projectList);
       setRunningEntry(running);
 
+      // Keep the toolbar icon in sync with what we just fetched. This is the only
+      // resync point now that the background has no periodic poll.
+      if (running?.isRunning) {
+        void notifyTimerStarted(running.id, running.startTime);
+      } else {
+        void notifyTimerStopped();
+      }
+
       if (running) {
         setSelectedProjectId(running.projectId ?? '');
         setSelectedTaskId(running.taskId ?? '');
