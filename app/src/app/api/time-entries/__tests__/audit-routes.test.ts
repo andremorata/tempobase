@@ -18,6 +18,8 @@ const accessMock = vi.hoisted(() => ({
   isEntryVisible: vi.fn(),
   canModifyEntry: vi.fn(),
   refsBelongToAccount: vi.fn(),
+  isProjectOpenForEntries: vi.fn(),
+  PROJECT_NOT_ACTIVE_ERROR: "This project is not active.",
 }));
 
 const auditMock = vi.hoisted(() => ({
@@ -118,6 +120,7 @@ describe("time-entry audit routes", () => {
     accessMock.isEntryVisible.mockReturnValue(true);
     accessMock.canModifyEntry.mockReturnValue(true);
     accessMock.refsBelongToAccount.mockResolvedValue(true);
+    accessMock.isProjectOpenForEntries.mockResolvedValue(true);
     withTenantMock.mockImplementation((db) => db);
 
     prismaMock.prisma.$transaction.mockImplementation(async (callback: unknown) => {
@@ -125,6 +128,75 @@ describe("time-entry audit routes", () => {
         return callback(prismaMock.prisma);
       }
       return Promise.all(callback as Promise<unknown>[]);
+    });
+  });
+
+  describe("projects closed for new time", () => {
+    const projectId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const otherProjectId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const jsonRequest = (method: string, body: unknown) =>
+      new NextRequest("http://localhost/api/time-entries", {
+        method,
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+      });
+    const putEntry = (body: unknown) =>
+      updateTimeEntry(jsonRequest("PUT", body), {
+        params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }),
+      });
+
+    beforeEach(() => {
+      accessMock.isProjectOpenForEntries.mockImplementation(
+        async (_accountId: string, id: string | null | undefined) => !id,
+      );
+    });
+
+    it("refuses a manual entry", async () => {
+      const response = await createTimeEntry(jsonRequest("POST", {
+        projectId,
+        startTime: "2026-03-31T09:00:00.000Z",
+        endTime: "2026-03-31T10:30:00.000Z",
+        isBillable: true,
+      }));
+
+      expect(response.status).toBe(409);
+      expect(prismaMock.prisma.timeEntry.create).not.toHaveBeenCalled();
+    });
+
+    it("refuses to start a timer", async () => {
+      const response = await startTimer(jsonRequest("POST", { projectId, isBillable: true }));
+
+      expect(response.status).toBe(409);
+      expect(prismaMock.prisma.timeEntry.create).not.toHaveBeenCalled();
+    });
+
+    it("refuses to move an entry onto the project", async () => {
+      prismaMock.prisma.timeEntry.findFirst.mockResolvedValue(buildEntry());
+
+      const response = await putEntry({ projectId: otherProjectId });
+
+      expect(response.status).toBe(409);
+      expect(prismaMock.prisma.timeEntry.update).not.toHaveBeenCalled();
+    });
+
+    it("keeps old entries on the project editable", async () => {
+      const entry = buildEntry();
+      prismaMock.prisma.timeEntry.findFirst.mockResolvedValue(entry);
+      prismaMock.prisma.timeEntry.update.mockResolvedValue(entry);
+
+      const response = await putEntry({ projectId, description: "Fixed typo" });
+
+      expect(response.status).toBe(200);
+    });
+
+    it("allows clearing the project from an entry", async () => {
+      const entry = buildEntry();
+      prismaMock.prisma.timeEntry.findFirst.mockResolvedValue(entry);
+      prismaMock.prisma.timeEntry.update.mockResolvedValue(buildEntry({ projectId: null, project: null }));
+
+      const response = await putEntry({ projectId: null });
+
+      expect(response.status).toBe(200);
     });
   });
 

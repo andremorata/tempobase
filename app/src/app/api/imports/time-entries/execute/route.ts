@@ -94,6 +94,15 @@ export async function POST(request: NextRequest) {
     const errors: { rowIndex: number; message: string }[] = [];
     const skippedRows: { rowIndex: number; message: string }[] = [];
 
+    const requestedProjectIds = [...new Set(validated.rows.flatMap((row) => row.projectId || []))];
+    const activeProjects = requestedProjectIds.length > 0
+      ? await prisma.project.findMany({
+          where: { id: { in: requestedProjectIds }, accountId, status: "Active", isDeleted: false },
+          select: { id: true },
+        })
+      : [];
+    const activeProjectIds = new Set(activeProjects.map((project) => project.id));
+
     await prisma.$transaction(async (tx) => {
       for (const row of validated.rows) {
         const previewRow = previewByRowIndex.get(row.rowIndex);
@@ -162,6 +171,11 @@ export async function POST(request: NextRequest) {
             rowIndex: row.rowIndex,
             message: "Entry already exists for this import row.",
           });
+          continue;
+        }
+
+        if (projectId && !activeProjectIds.has(projectId)) {
+          errors.push({ rowIndex: row.rowIndex, message: "Project is not active." });
           continue;
         }
 

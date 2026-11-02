@@ -45,11 +45,14 @@ export function Popup() {
   const [startTimeInput, setStartTimeInput] = useState('');
 
   const projectOptions = useMemo<ProjectOption[]>(() => {
-    return projects.map((project) => ({
-      project,
-      label: project.client ? `${project.client.name} / ${project.name}` : project.name,
-    }));
-  }, [projects]);
+    return projects
+      // Keep the current selection listed so a timer already on a closed project still shows its name.
+      .filter((project) => project.status === 'Active' || project.id === selectedProjectId)
+      .map((project) => ({
+        project,
+        label: project.client ? `${project.client.name} / ${project.name}` : project.name,
+      }));
+  }, [projects, selectedProjectId]);
 
   const selectedProject = useMemo(() => {
     return projects.find((p) => p.id === selectedProjectId) ?? null;

@@ -219,6 +219,42 @@ describe("CSV import routes", () => {
     );
   });
 
+  it("reports rows whose project is not active and imports the rest", async () => {
+    const closedProjectId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const row = (rowIndex: number, projectId: string | null) => ({
+      rowIndex,
+      startTime: "2026-04-01T09:00:00.000Z",
+      endTime: "2026-04-01T10:00:00.000Z",
+      description: `Row ${rowIndex}`,
+      isBillable: true,
+      projectId,
+      taskId: null,
+      include: true,
+    });
+    prismaMock.prisma.importSession.findFirst.mockResolvedValueOnce({
+      id: importSessionId,
+      accountId,
+      userId,
+      status: "pending",
+      importedCount: 0,
+      skippedCount: 0,
+      previewRowsJson: JSON.stringify([row(0, closedProjectId), row(1, null)]),
+    });
+
+    const response = await executeImport(
+      buildExecuteRequest([row(0, closedProjectId), row(1, null)] as never),
+    );
+    const body = await response.json();
+
+    expect(prismaMock.prisma.project.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ accountId, status: "Active" }),
+      }),
+    );
+    expect(body.importedCount).toBe(1);
+    expect(body.errors).toEqual([{ rowIndex: 0, message: "Project is not active." }]);
+  });
+
   it("skips duplicate rows instead of creating duplicate time entries", async () => {
     prismaMock.prisma.importSession.findFirst.mockResolvedValueOnce({
       id: importSessionId,

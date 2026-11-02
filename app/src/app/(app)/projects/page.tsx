@@ -1,7 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Pencil, Trash2, Archive, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Archive,
+  ArchiveRestore,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Eye,
+  EyeOff,
+  Pause,
+  Play,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,16 +40,19 @@ import {
   useUpdateProject,
   useDeleteProject,
   useArchiveProject,
+  useDuplicateProject,
 } from "@/lib/api/hooks/projects";
 import { useClients } from "@/lib/api/hooks/clients";
 import { useCurrentUserProfile } from "@/lib/api/hooks/account";
 import { useSummaryReport } from "@/lib/api/hooks/reports";
 import { TaskList } from "@/components/projects/task-list";
 import { getApiErrorMessage } from "@/lib/api/client";
+import { getBudgetProgress } from "@/lib/projects/budget";
 import type {
   Project,
   CreateProjectRequest,
   BillingType,
+  ProjectStatus,
 } from "@/lib/api/types";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/auth-context";
@@ -44,9 +60,11 @@ import { hasRole, MANAGER_ROLES } from "@/lib/auth/roles";
 
 const STATUS_COLORS: Record<string, string> = {
   Active: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  Inactive: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
   Archived: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
-  Completed: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
 };
+
+const MIN_PERCENT_INSIDE_BAR = 15;
 
 export default function ProjectsPage() {
   const { user } = useAuth();
@@ -55,6 +73,8 @@ export default function ProjectsPage() {
   const { data: clients } = useClients();
   const { data: profile } = useCurrentUserProfile();
   const canViewAmounts = profile?.canViewAmounts ?? true;
+  // The summary report limits Members to their own entries, so a budget balance would be wrong.
+  const seesOnlyOwnHours = user?.role === "Member";
   const { data: summaryReport } = useSummaryReport({ groupBy: "Project" });
   const projectHoursMap = new Map(
     summaryReport?.groups.map((g) => [g.groupId, g.totalHours]) ?? [],
@@ -63,11 +83,13 @@ export default function ProjectsPage() {
   const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
   const archiveProject = useArchiveProject();
+  const duplicateProject = useDuplicateProject();
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showValues, setShowValues] = useState(false);
 
   // Form state
   const [name, setName] = useState("");
@@ -134,12 +156,41 @@ export default function ProjectsPage() {
     }
   };
 
-  const handleArchive = async (projectId: string) => {
+  const handleArchive = async (project: Project) => {
+    const isRestore = project.status === "Archived";
     try {
-      await archiveProject.mutateAsync(projectId);
-      toast.success("Project archived.");
+      await archiveProject.mutateAsync(project.id);
+      toast.success(isRestore ? "Project restored." : "Project archived.");
     } catch (error) {
-      showErrorToast("Could not archive project.", error, "Failed to archive project.");
+      showErrorToast(
+        isRestore ? "Could not restore project." : "Could not archive project.",
+        error,
+        isRestore ? "Failed to restore project." : "Failed to archive project.",
+      );
+    }
+  };
+
+  const handleStatusChange = async (projectId: string, status: ProjectStatus) => {
+    const isActivating = status === "Active";
+    try {
+      await updateProject.mutateAsync({ id: projectId, data: { status } });
+      toast.success(isActivating ? "Project activated." : "Project deactivated.");
+    } catch (error) {
+      showErrorToast(
+        isActivating ? "Could not activate project." : "Could not deactivate project.",
+        error,
+        "Failed to update project.",
+      );
+    }
+  };
+
+  const handleDuplicate = async (projectId: string) => {
+    try {
+      const copy = await duplicateProject.mutateAsync(projectId);
+      toast.success("Project duplicated. It stays inactive until you activate it.");
+      openEdit(copy);
+    } catch (error) {
+      showErrorToast("Could not duplicate project.", error, "Failed to duplicate project.");
     }
   };
 
@@ -156,17 +207,189 @@ export default function ProjectsPage() {
   };
 
   const clientMap = new Map(clients?.map((c) => [c.id, c.name]) ?? []);
+  const activeProjects = projects?.filter((p) => p.status === "Active") ?? [];
+  const inactiveProjects = projects?.filter((p) => p.status === "Inactive") ?? [];
+  const archivedProjects = projects?.filter((p) => p.status === "Archived") ?? [];
+
+  const renderProject = (project: Project) => {
+    const isExpanded = expandedId === project.id;
+    const loggedHours = projectHoursMap.get(project.id) ?? 0;
+    const budget = getBudgetProgress(loggedHours, project.budgetHours);
+    const isOverBudget = budget !== null && budget.remainingHours < 0;
+    const isArchived = project.status === "Archived";
+    return (
+      <div key={project.id} className="rounded-lg border bg-card">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3">
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => setExpandedId(isExpanded ? null : project.id)}
+          >
+            {isExpanded ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+          </Button>
+          <span
+            className="inline-block h-3 w-3 rounded-full shrink-0"
+            style={{ backgroundColor: project.color }}
+          />
+          <span className="font-medium flex-1">{project.name}</span>
+          {project.clientId && (
+            <span className="text-xs text-muted-foreground">
+              {clientMap.get(project.clientId) ?? ""}
+            </span>
+          )}
+          <Badge
+            variant="secondary"
+            className={STATUS_COLORS[project.status] ?? ""}
+          >
+            {project.status}
+          </Badge>
+          <div className={canManage ? "ml-auto flex gap-1" : "hidden"}>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => openEdit(project)}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="xs"
+              disabled={duplicateProject.isPending}
+              onClick={() => void handleDuplicate(project.id)}
+              title="Duplicate"
+              aria-label={`Duplicate ${project.name}`}
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </Button>
+            {project.status === "Active" && (
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => void handleStatusChange(project.id, "Inactive")}
+                title="Deactivate"
+                aria-label={`Deactivate ${project.name}`}
+              >
+                <Pause className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {project.status === "Inactive" && (
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => void handleStatusChange(project.id, "Active")}
+                title="Activate"
+                aria-label={`Activate ${project.name}`}
+              >
+                <Play className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => void handleArchive(project)}
+              title={isArchived ? "Restore" : "Archive"}
+              aria-label={`${isArchived ? "Restore" : "Archive"} ${project.name}`}
+            >
+              {isArchived ? (
+                <ArchiveRestore className="h-3.5 w-3.5" />
+              ) : (
+                <Archive className="h-3.5 w-3.5" />
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => setDeleteId(project.id)}
+            >
+              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+            </Button>
+          </div>
+        </div>
+        {budget !== null && seesOnlyOwnHours && (
+          <p className="px-4 pb-2.5 pl-12 text-xs text-muted-foreground">
+            {loggedHours.toFixed(1)} hrs logged by you
+          </p>
+        )}
+        {budget !== null && !seesOnlyOwnHours && (
+          <div className="px-4 pb-2.5 pl-12 space-y-1">
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>{loggedHours.toFixed(1)} hrs logged</span>
+              <span className={isOverBudget ? "text-destructive font-medium" : ""}>
+                {isOverBudget
+                  ? `${Math.abs(budget.remainingHours).toFixed(1)} hrs over`
+                  : `${budget.remainingHours.toFixed(1)} hrs left`}
+              </span>
+            </div>
+            <div
+              role="progressbar"
+              aria-label={`Budget used by ${project.name}`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.min(budget.percent, 100)}
+              aria-valuetext={`${budget.percent}%`}
+              className="flex h-5 w-full items-center overflow-hidden rounded-full bg-muted text-xs font-semibold tabular-nums"
+            >
+              <div
+                className={`flex h-full items-center justify-end rounded-full transition-all ${
+                  isOverBudget
+                    ? "bg-destructive text-white dark:text-zinc-950"
+                    : budget.percent > 80
+                      ? "bg-amber-500 text-zinc-950"
+                      : "bg-emerald-500 text-zinc-950"
+                }`}
+                style={{ width: `${Math.min(budget.percent, 100)}%` }}
+              >
+                {budget.percent >= MIN_PERCENT_INSIDE_BAR && (
+                  <span className="px-2">{budget.percent}%</span>
+                )}
+              </div>
+              {/* A short fill has no room for the label, so it sits right after the fill. */}
+              {budget.percent < MIN_PERCENT_INSIDE_BAR && (
+                <span className="px-1.5 text-muted-foreground">{budget.percent}%</span>
+              )}
+            </div>
+          </div>
+        )}
+        {isExpanded && (
+          <div className="border-t px-4 py-3 pl-12">
+            <TaskList projectId={project.id} showRates={showValues} />
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
-        {canManage && (
-          <Button onClick={openCreate} size="sm">
-            <Plus className="mr-1.5 h-4 w-4" />
-            Add project
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {(canManage || canViewAmounts) && (
+            <Button
+              variant="outline"
+              size="sm"
+              aria-pressed={showValues}
+              onClick={() => setShowValues((current) => !current)}
+            >
+              {showValues ? (
+                <EyeOff className="mr-1.5 h-4 w-4" />
+              ) : (
+                <Eye className="mr-1.5 h-4 w-4" />
+              )}
+              {showValues ? "Hide values" : "Show values"}
+            </Button>
+          )}
+          {canManage && (
+            <Button onClick={openCreate} size="sm">
+              <Plus className="mr-1.5 h-4 w-4" />
+              Add project
+            </Button>
+          )}
+        </div>
       </div>
 
       {isLoading && (
@@ -179,109 +402,33 @@ export default function ProjectsPage() {
         </p>
       )}
 
-      <div className="space-y-2">
-        {projects?.map((project) => {
-          const isExpanded = expandedId === project.id;
-          const loggedHours = projectHoursMap.get(project.id) ?? 0;
-          const budgetPct =
-            project.budgetHours && project.budgetHours > 0
-              ? Math.min((loggedHours / project.budgetHours) * 100, 100)
-              : null;
-          const isOverBudget =
-            project.budgetHours != null && loggedHours > project.budgetHours;
-          return (
-            <div
-              key={project.id}
-              className="rounded-lg border bg-card"
-            >
-              <div className="flex items-center gap-3 px-4 py-3">
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  onClick={() =>
-                    setExpandedId(isExpanded ? null : project.id)
-                  }
-                >
-                  {isExpanded ? (
-                    <ChevronDown className="h-4 w-4" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4" />
-                  )}
-                </Button>
-                <span
-                  className="inline-block h-3 w-3 rounded-full shrink-0"
-                  style={{ backgroundColor: project.color }}
-                />
-                <span className="font-medium flex-1">{project.name}</span>
-                {project.clientId && (
-                  <span className="text-xs text-muted-foreground">
-                    {clientMap.get(project.clientId) ?? ""}
-                  </span>
-                )}
-                <Badge
-                  variant="secondary"
-                  className={STATUS_COLORS[project.status] ?? ""}
-                >
-                  {project.status}
-                </Badge>
-                <div className={canManage ? "flex gap-1" : "hidden"}>
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => openEdit(project)}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  {project.status === "Active" && (
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => void handleArchive(project.id)}
-                      title="Archive"
-                    >
-                      <Archive className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => setDeleteId(project.id)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                  </Button>
-                </div>
-              </div>
-              {budgetPct !== null && (
-                <div className="px-4 pb-2.5 pl-12 space-y-1">
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>{loggedHours.toFixed(1)} hrs logged</span>
-                    <span className={isOverBudget ? "text-destructive font-medium" : ""}>
-                      {project.budgetHours} hrs budget
-                    </span>
-                  </div>
-                  <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${
-                        isOverBudget
-                          ? "bg-destructive"
-                          : budgetPct > 80
-                            ? "bg-amber-500"
-                            : "bg-emerald-500"
-                      }`}
-                      style={{ width: `${budgetPct}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-              {isExpanded && (
-                <div className="border-t px-4 py-3 pl-12">
-                  <TaskList projectId={project.id} />
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      {activeProjects.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-medium text-muted-foreground">
+            Active ({activeProjects.length})
+          </h2>
+          {activeProjects.map(renderProject)}
+        </section>
+      )}
+
+      {inactiveProjects.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-medium text-muted-foreground">
+            Inactive ({inactiveProjects.length})
+          </h2>
+          {inactiveProjects.map(renderProject)}
+        </section>
+      )}
+
+      {archivedProjects.length > 0 && (
+        <details className="group">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-sm font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
+            <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
+            Archived ({archivedProjects.length})
+          </summary>
+          <div className="space-y-2 pt-2">{archivedProjects.map(renderProject)}</div>
+        </details>
+      )}
 
       {/* Create / Edit Dialog */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>

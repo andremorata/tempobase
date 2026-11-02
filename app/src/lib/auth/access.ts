@@ -161,6 +161,23 @@ export async function refsBelongToAccount(
   return true;
 }
 
+export const PROJECT_NOT_ACTIVE_ERROR = "This project is not active. Activate it before logging time.";
+
+/**
+ * Only Active projects take new time. Inactive and Archived projects keep their existing
+ * entries, which stay editable as long as they do not move onto a closed project.
+ */
+export async function isProjectOpenForEntries(
+  accountId: string,
+  projectId: string | null | undefined,
+): Promise<boolean> {
+  if (!projectId) return true;
+  const count = await prisma.project.count({
+    where: { id: projectId, accountId, status: "Active", isDeleted: false },
+  });
+  return count > 0;
+}
+
 /**
  * Hourly rates are amounts. Managers always see them because they edit projects and
  * tasks; hiding the rate there would make the edit form save it back as empty.

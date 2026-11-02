@@ -33,6 +33,18 @@ describe("api client error normalization", () => {
     ]);
   });
 
+  it("reads the error field that Route Handlers return", async () => {
+    const response = new Response(JSON.stringify({ error: "This project is not active." }), {
+      status: 409,
+      statusText: "Conflict",
+      headers: { "content-type": "application/json" },
+    });
+
+    const error = await parseApiErrorResponse(response);
+
+    expect(getApiErrorMessage(error, "Fallback message")).toBe("This project is not active.");
+  });
+
   it("getApiErrorMessage prefers extracted detail over the generic message", () => {
     const error = new ApiError(400, "One or more errors occurred!", ["Current password is incorrect."]);
 

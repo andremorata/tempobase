@@ -16,9 +16,10 @@ import { hasRole, MANAGER_ROLES } from "@/lib/auth/roles";
 
 interface TaskListProps {
   projectId: string;
+  showRates: boolean;
 }
 
-export function TaskList({ projectId }: TaskListProps) {
+export function TaskList({ projectId, showRates }: TaskListProps) {
   const { user } = useAuth();
   const canManage = hasRole(MANAGER_ROLES, user?.role);
   const { data: tasks } = useProjectTasks(projectId);
@@ -165,7 +166,7 @@ export function TaskList({ projectId }: TaskListProps) {
                 <span className={task.isActive ? "" : "text-muted-foreground line-through"}>
                   {task.name}
                 </span>
-                {task.hourlyRate != null && (
+                {showRates && task.hourlyRate != null && (
                   <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
                     ${task.hourlyRate}/hr
                   </span>

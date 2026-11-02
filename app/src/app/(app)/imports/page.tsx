@@ -272,7 +272,8 @@ export default function ImportsPage() {
 
   const parseMutation = useParseCsvImport();
   const executeMutation = useExecuteImport();
-  const { data: projects = [] } = useProjects();
+  const { data: allProjects = [] } = useProjects();
+  const projects = allProjects.filter((project) => project.status === "Active");
   const selectedDateFormat = DATE_FORMAT_OPTIONS.find((option) => option.value === dateFormat) ?? DATE_FORMAT_OPTIONS[0];
   const selectedDateFormatLabel = selectedDateFormat.label;
 

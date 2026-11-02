@@ -97,7 +97,12 @@
 
 - Required: `name` unique within the account.
 - Project billing defaults may influence new time entries.
-- Archived projects are hidden from normal selection but preserved historically.
+- A project is Active, Inactive, or Archived.
+- Only Active projects accept new time. The API enforces this for manual entries, timers, imports, and entries moved to another project.
+- Inactive means ready but not in use yet, such as a project prepared for the next cycle.
+- Archived means finished or discontinued.
+- Inactive and Archived projects are hidden from normal selection but preserved historically. Their existing entries stay editable.
+- Duplicating a project copies its data, tasks, and member access, but not its time entries. The copy starts Inactive.
 
 ### Task
 
