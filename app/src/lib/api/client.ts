@@ -13,6 +13,7 @@ type ApiErrorPayload = {
   reason?: string;
   title?: string;
   detail?: string;
+  error?: string;
   errors?: unknown;
 };
 
@@ -80,7 +81,7 @@ function normalizeApiError(payload: unknown, fallback: string): { message: strin
   if (typeof payload === "object") {
     const errorPayload = payload as ApiErrorPayload;
     const details = flattenErrorMessages(errorPayload.errors);
-    const primaryMessage = [errorPayload.detail, errorPayload.reason, errorPayload.message, errorPayload.title]
+    const primaryMessage = [errorPayload.detail, errorPayload.reason, errorPayload.message, errorPayload.title, errorPayload.error]
       .find((value) => typeof value === "string" && value.trim().length > 0)
       ?.trim();
 

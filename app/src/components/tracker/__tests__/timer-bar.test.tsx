@@ -3,7 +3,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TimerBar } from "../timer-bar";
 
-const { mockToastError, mockStartMutate, mockStopMutate, mockCancelMutate, mockAdjustStartMutate, mockUseRunningEntry } = vi.hoisted(() => ({
+const { mockToastError, mockStartMutate, mockStopMutate, mockCancelMutate, mockAdjustStartMutate, mockUseRunningEntry, mockData } = vi.hoisted(() => ({
+  mockData: {
+    projects: [] as Array<Record<string, unknown>>,
+    entries: [] as Array<Record<string, unknown>>,
+    profile: undefined as Record<string, unknown> | undefined,
+  },
   mockToastError: vi.fn(),
   mockAdjustStartMutate: vi.fn(),
   mockStartMutate: vi.fn(),
@@ -20,16 +25,16 @@ vi.mock("@/lib/api/hooks/time-entries", () => ({
   useRunningEntry: mockUseRunningEntry,
   useUpdateTimeEntry: () => ({ mutate: vi.fn(), isPending: false }),
   useAdjustTimerStart: () => ({ mutate: mockAdjustStartMutate, isPending: false }),
-  useTimeEntries: () => ({ data: [] }),
+  useTimeEntries: () => ({ data: mockData.entries }),
   useCancelTimer: () => ({ mutate: mockCancelMutate, isPending: false }),
 }));
 
 vi.mock("@/lib/api/hooks/account", () => ({
-  useCurrentUserProfile: () => ({ data: undefined }),
+  useCurrentUserProfile: () => ({ data: mockData.profile }),
 }));
 
 vi.mock("@/lib/api/hooks/projects", () => ({
-  useProjects: () => ({ data: [] }),
+  useProjects: () => ({ data: mockData.projects }),
 }));
 
 vi.mock("@/lib/api/hooks/tasks", () => ({
@@ -88,6 +93,51 @@ describe("TimerBar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseRunningEntry.mockReturnValue({ data: undefined });
+    mockData.projects = [];
+    mockData.entries = [];
+    mockData.profile = undefined;
+  });
+
+  it("suggests recent entries only from Active projects or without a project", () => {
+    mockData.projects = [
+      { id: "open", name: "Open", status: "Active", color: "#111111" },
+      { id: "paused", name: "Paused", status: "Inactive", color: "#222222" },
+      { id: "done", name: "Done", status: "Archived", color: "#333333" },
+    ];
+    mockData.entries = [
+      { description: "On open", projectId: "open", tagIds: [] },
+      { description: "On paused", projectId: "paused", tagIds: [] },
+      { description: "On done", projectId: "done", tagIds: [] },
+      { description: "No project", projectId: null, tagIds: [] },
+    ];
+
+    render(<TimerBar />, { wrapper: makeWrapper() });
+    fireEvent.focus(screen.getByPlaceholderText("What are you working on?"));
+
+    expect(screen.getByText("On open")).toBeDefined();
+    expect(screen.getByText("No project", { selector: "span.truncate" })).toBeDefined();
+    expect(screen.queryByText("On paused")).toBeNull();
+    expect(screen.queryByText("On done")).toBeNull();
+  });
+
+  it("ignores a default project that is no longer Active", () => {
+    mockData.profile = { defaultProjectId: "paused" };
+    mockData.projects = [{ id: "paused", name: "Paused", status: "Inactive", color: "#222222" }];
+
+    render(<TimerBar />, { wrapper: makeWrapper() });
+    fireEvent.click(screen.getByTitle("Start timer (Ctrl+Shift+S)"));
+
+    expect(mockStartMutate.mock.calls[0][0].projectId ?? null).toBeNull();
+  });
+
+  it("applies a default project that is Active", () => {
+    mockData.profile = { defaultProjectId: "open" };
+    mockData.projects = [{ id: "open", name: "Open", status: "Active", color: "#111111" }];
+
+    render(<TimerBar />, { wrapper: makeWrapper() });
+    fireEvent.click(screen.getByTitle("Start timer (Ctrl+Shift+S)"));
+
+    expect(mockStartMutate.mock.calls[0][0].projectId).toBe("open");
   });
 
   it("shows play button when no timer is running", () => {

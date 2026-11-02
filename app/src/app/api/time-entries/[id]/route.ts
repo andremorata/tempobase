@@ -16,6 +16,8 @@ import {
   getMemberAccess,
   isEntryVisible,
   isProjectAccessible,
+  isProjectOpenForEntries,
+  PROJECT_NOT_ACTIVE_ERROR,
   isTaskAccessible,
   refsBelongToAccount,
 } from "@/lib/auth/access";
@@ -186,6 +188,12 @@ export async function PUT(
       tagIds: validated.tagIds,
     }))) {
       return NextResponse.json({ error: "Project, task or tag not found" }, { status: 404 });
+    }
+    if (
+      validated.projectId !== existingEntry.projectId &&
+      !(await isProjectOpenForEntries(accountId, validated.projectId))
+    ) {
+      return NextResponse.json({ error: PROJECT_NOT_ACTIVE_ERROR }, { status: 409 });
     }
 
     // Cannot update running timer times

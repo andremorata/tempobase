@@ -31,7 +31,7 @@ export interface UpdateClientRequest {
 // ─── Projects ───────────────────────────────────────────────────────────────
 
 export type BillingType = "Hourly" | "Fixed" | "NonBillable";
-export type ProjectStatus = "Active" | "Archived" | "Completed";
+export type ProjectStatus = "Active" | "Inactive" | "Archived";
 
 export interface ProjectTaskSummary {
   id: string;
@@ -64,7 +64,8 @@ export interface CreateProjectRequest {
 }
 
 export interface UpdateProjectRequest {
-  name: string;
+  name?: string;
+  status?: ProjectStatus;
   color?: string;
   clientId?: string | null;
   billingType?: BillingType;

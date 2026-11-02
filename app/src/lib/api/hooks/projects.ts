@@ -53,6 +53,15 @@ export function useDeleteProject() {
   });
 }
 
+export function useDuplicateProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<Project>(`/projects/${id}/duplicate`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: PROJECTS_KEY }),
+  });
+}
+
 export function useArchiveProject() {
   const qc = useQueryClient();
   return useMutation({

@@ -20,6 +20,7 @@ import {
   canSeeRates,
   getMemberAccess,
   isEntryVisible,
+  isProjectOpenForEntries,
   refsBelongToAccount,
 } from "../access";
 
@@ -84,5 +85,28 @@ describe("member access", () => {
     db.tag.count.mockResolvedValue(2);
     expect(await refsBelongToAccount("a1", { projectIds: ["p1"], tagIds: ["t1", "t2", "t1"] })).toBe(true);
     expect(await refsBelongToAccount("a1", { projectIds: [null, undefined] })).toBe(true);
+  });
+});
+
+describe("isProjectOpenForEntries", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("only counts Active projects of the account", async () => {
+    db.project.count.mockResolvedValue(1);
+    expect(await isProjectOpenForEntries("a1", "p1")).toBe(true);
+    expect(db.project.count).toHaveBeenCalledWith({
+      where: { id: "p1", accountId: "a1", status: "Active", isDeleted: false },
+    });
+
+    db.project.count.mockResolvedValue(0);
+    expect(await isProjectOpenForEntries("a1", "p1")).toBe(false);
+  });
+
+  it("allows entries without a project", async () => {
+    expect(await isProjectOpenForEntries("a1", null)).toBe(true);
+    expect(await isProjectOpenForEntries("a1", undefined)).toBe(true);
+    expect(db.project.count).not.toHaveBeenCalled();
   });
 });

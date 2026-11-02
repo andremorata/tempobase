@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { requireTracker, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
-import { getMemberAccess, isProjectAccessible, isTaskAccessible, refsBelongToAccount } from "@/lib/auth/access";
+import { getMemberAccess, isProjectAccessible, isProjectOpenForEntries, isTaskAccessible, PROJECT_NOT_ACTIVE_ERROR, refsBelongToAccount } from "@/lib/auth/access";
 import { createAuditLog } from "@/lib/audit/logger";
 import { summarizeTimeEntryAudit, toTimeEntryAuditSnapshot } from "../audit";
 import { mapTimeEntry } from "../mappers";
@@ -43,6 +43,9 @@ export async function POST(request: NextRequest) {
       taskIds: [validated.taskId],
     }))) {
       return NextResponse.json({ error: "Project or task not found" }, { status: 404 });
+    }
+    if (!(await isProjectOpenForEntries(accountId, validated.projectId))) {
+      return NextResponse.json({ error: PROJECT_NOT_ACTIVE_ERROR }, { status: 409 });
     }
 
     // Check if there's already a running timer

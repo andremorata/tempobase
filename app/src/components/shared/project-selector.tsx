@@ -40,7 +40,7 @@ export function ProjectSelector({
         <SelectTrigger className="w-44">
           <SelectValue placeholder="No project">
             {projectId
-              ? (activeProjects.find((p) => p.id === projectId)?.name ?? projectId)
+              ? (projects?.find((p) => p.id === projectId)?.name ?? projectId)
               : undefined}
           </SelectValue>
         </SelectTrigger>

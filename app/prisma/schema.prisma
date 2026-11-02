@@ -21,6 +21,7 @@ enum UserRole {
 
 enum ProjectStatus {
   Active
+  Inactive
   Archived
 }
 

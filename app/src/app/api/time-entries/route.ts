@@ -11,7 +11,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { withTenant } from "@/lib/db/extensions";
 import { requireAuth, requireTracker, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
-import { getMemberAccess, applyAccessFilter, isProjectAccessible, isTaskAccessible, refsBelongToAccount } from "@/lib/auth/access";
+import { getMemberAccess, applyAccessFilter, isProjectAccessible, isProjectOpenForEntries, isTaskAccessible, PROJECT_NOT_ACTIVE_ERROR, refsBelongToAccount } from "@/lib/auth/access";
 import { createAuditLog } from "@/lib/audit/logger";
 import { mapTimeEntry } from "./mappers";
 import { summarizeTimeEntryAudit, toTimeEntryAuditSnapshot } from "./audit";
@@ -135,6 +135,9 @@ export async function POST(request: NextRequest) {
       tagIds: validated.tagIds,
     }))) {
       return NextResponse.json({ error: "Project, task or tag not found" }, { status: 404 });
+    }
+    if (!(await isProjectOpenForEntries(accountId, validated.projectId))) {
+      return NextResponse.json({ error: PROJECT_NOT_ACTIVE_ERROR }, { status: 409 });
     }
 
     const startTime = new Date(validated.startTime);

@@ -189,6 +189,7 @@ export function TimerBar() {
       if (seen.has(key)) continue;
       seen.add(key);
       const project = projects?.find((p) => p.id === entry.projectId);
+      if (entry.projectId && project?.status !== "Active") continue;
       result.push({
         description: entry.description,
         projectId: entry.projectId ?? null,
@@ -233,11 +234,13 @@ export function TimerBar() {
     if (!profile?.defaultProjectId) return;
     if (form.projectId) return;
     if (form.description || form.taskId || form.tagIds.length > 0) return;
+    if (projects?.find((p) => p.id === profile.defaultProjectId)?.status !== "Active") return;
 
     dispatch({ type: "setProjectId", value: profile.defaultProjectId });
   }, [
     runningEntry,
     profile?.defaultProjectId,
+    projects,
     form.projectId,
     form.description,
     form.taskId,

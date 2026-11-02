@@ -18,7 +18,7 @@ const UpdateProjectSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   color: z.string().max(20).nullable().optional(),
   clientId: z.string().uuid().nullable().optional(),
-  status: z.enum(["Active", "Archived"]).optional(),
+  status: z.enum(["Active", "Inactive", "Archived"]).optional(),
   billingType: z.enum(["Hourly", "Fixed", "NonBillable"]).optional(),
   hourlyRate: z.number().min(0).nullable().optional(),
   budgetHours: z.number().min(0).nullable().optional(),

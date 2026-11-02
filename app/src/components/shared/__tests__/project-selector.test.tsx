@@ -55,6 +55,24 @@ describe("ProjectSelector", () => {
     expect(screen.getByText("No project")).toBeDefined();
   });
 
+  it("shows the name of a selected project that is no longer active", () => {
+    vi.mocked(useProjects).mockReturnValue({
+      data: mockProjects,
+    } as unknown as ReturnType<typeof useProjects>);
+
+    render(
+      <ProjectSelector
+        projectId="proj-3"
+        taskId={null}
+        onProjectChange={vi.fn()}
+        onTaskChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Archived Proj")).toBeDefined();
+    expect(screen.queryByText("proj-3")).toBeNull();
+  });
+
   it("only shows Active projects, not archived ones", () => {
     vi.mocked(useProjects).mockReturnValue({
       data: mockProjects,

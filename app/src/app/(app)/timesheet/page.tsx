@@ -36,8 +36,9 @@ import {
 } from "@/lib/api/hooks/time-entries";
 import { useProjects } from "@/lib/api/hooks/projects";
 import { useProjectTasks } from "@/lib/api/hooks/tasks";
-import { apiFetch } from "@/lib/api/client";
+import { apiFetch, getApiErrorMessage } from "@/lib/api/client";
 import type { TimeEntry, Project, ProjectTask } from "@/lib/api/types";
+import { toast } from "sonner";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -376,13 +377,22 @@ export default function TimesheetPage() {
     if (hours === 0) return;
     const startTime = new Date(day);
     startTime.setHours(defaultStartHour, 0, 0, 0);
-    createEntry.mutate({
-      startTime: startTime.toISOString(),
-      endTime: addHours(startTime, hours).toISOString(),
-      projectId: row.projectId,
-      taskId: row.taskId,
-      isBillable: true,
-    });
+    createEntry.mutate(
+      {
+        startTime: startTime.toISOString(),
+        endTime: addHours(startTime, hours).toISOString(),
+        projectId: row.projectId,
+        taskId: row.taskId,
+        isBillable: true,
+      },
+      {
+        onError: (error) => {
+          toast.error("Could not log time.", {
+            description: getApiErrorMessage(error, "Failed to create the time entry."),
+          });
+        },
+      },
+    );
   };
 
   // ─── Draft row confirm ────────────────────────────────────────────────────
