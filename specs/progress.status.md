@@ -23,6 +23,7 @@ This file captures the current operating posture of the repository. It is not th
 - Vercel Firewall rule `Rate limit password endpoints` (configured in the Vercel dashboard, not in the repo): 10 POSTs per minute per IP on login, registration, password change and self-deletion.
 - Unique index `domain_users_email_active_key` on `email` for active users (Prisma `partialIndexes` preview).
 - Security hardening from the 2026-10-26 audit: server-side role enforcement per the permissions matrix, per-request session revalidation, Member scoping to own entries, cross-account id checks, shared-link scoping, invite and Owner-role rules, CSV formula escaping, no default `NEXTAUTH_SECRET` in Docker files, and `next` 16.4.3 plus dependency overrides for audit findings.
+- CSV import reopened to Manager and Member: entries stay owned by the importer, rows outside the user's project/task access are flagged on parse and rejected on execute, and execute now rejects task ids from another account or project.
 
 ## Validation Snapshot
 

@@ -8,7 +8,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireOwnerOrAdmin, getCurrentTenantId, getCurrentUserId, authErrorResponse } from "@/lib/auth/helpers";
+import { requireTracker, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
+import { getMemberAccess, isProjectAccessible, isTaskAccessible } from "@/lib/auth/access";
 
 const DateFormatSchema = z.enum(["ymd", "dmy", "mdy"]).default("ymd");
 
@@ -29,9 +30,11 @@ type ParsedImportRow = {
 
 export async function POST(request: NextRequest) {
   try {
-    await requireOwnerOrAdmin();
+    await requireTracker();
     const accountId = await getCurrentTenantId();
-    const userId = await getCurrentUserId();
+    const user = await getCurrentUser();
+    const userId = user.id;
+    const access = await getMemberAccess(userId, accountId, user.role);
 
     // Parse multipart form data
     const formData = await request.formData();
@@ -208,16 +211,22 @@ export async function POST(request: NextRequest) {
         const key = rawProject.trim().toLowerCase();
         const matched = projectByName.get(key);
         if (matched) {
-          suggestedProjectId = matched.id;
+          if (!isProjectAccessible(access, matched.id)) {
+            rowErrors.push(`You do not have access to project '${rawProject}'.`);
+          } else {
+            suggestedProjectId = matched.id;
+          }
 
           // Match task within project
-          if (rawTask) {
+          if (suggestedProjectId && rawTask) {
             const matchedTask = tasks.find(
               (t) =>
                 t.projectId === matched.id &&
                 t.name.trim().toLowerCase() === rawTask.trim().toLowerCase()
             );
-            if (matchedTask) {
+            if (matchedTask && !isTaskAccessible(access, matchedTask.id)) {
+              rowErrors.push(`You do not have access to task '${rawTask}'.`);
+            } else if (matchedTask) {
               suggestedTaskId = matchedTask.id;
             }
           }

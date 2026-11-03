@@ -70,6 +70,7 @@
 2. The system validates and maps rows.
 3. The user confirms the import.
 4. Duplicate rows are skipped according to the active duplicate-detection rules.
+5. Imported entries belong to the importing user. Rows on a project or task outside the user's access are flagged in the preview and rejected on execute.
 
 ## 4. Entity Rules
 
@@ -148,7 +149,7 @@
 | Report | View own | Yes | Yes | Yes | Yes | Yes |
 | Report | View team | Yes | Yes | Yes | No | Yes |
 | Report | Share/export | Yes | Yes | Yes | Depends on route | No |
-| CSV Import | Execute | Yes | Yes | No | No | No |
+| CSV Import | Execute (own entries, within project/task access) | Yes | Yes | Yes | Yes | No |
 | Audit Log | View | Yes | Yes | No | No | No |
 
 ## 6. Invariants

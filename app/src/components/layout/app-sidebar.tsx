@@ -30,6 +30,7 @@ import {
 import { useAuth } from "@/contexts/auth-context";
 import { Button } from "@/components/ui/button";
 import { APP_VERSION } from "@/lib/app-version";
+import { hasRole, TRACKER_ROLES } from "@/lib/auth/roles";
 
 const trackingItems = [
   { title: "Tracker", href: "/tracker", icon: Clock },
@@ -59,8 +60,9 @@ const accountItems = [
 export function AppSidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
-  // Audit and CSV import are Owner/Admin only on the server too
+  // Audit is Owner/Admin only and CSV import excludes Viewer on the server too
   const canViewAudit = user?.role === "Owner" || user?.role === "Admin";
+  const canImport = hasRole(TRACKER_ROLES, user?.role);
 
   return (
     <Sidebar collapsible="icon">
@@ -135,7 +137,7 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {canViewAudit && (
+        {canImport && (
           <SidebarGroup>
             <SidebarGroupLabel>Data</SidebarGroupLabel>
             <SidebarGroupContent>

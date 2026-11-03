@@ -15,6 +15,8 @@ import {
 import { useParseCsvImport, useExecuteImport } from "@/lib/api/hooks/imports";
 import { useProjects } from "@/lib/api/hooks/projects";
 import { getApiErrorMessage } from "@/lib/api/client";
+import { useAuth } from "@/contexts/auth-context";
+import { hasRole, TRACKER_ROLES } from "@/lib/auth/roles";
 import type { ImportDateFormat, ImportPreviewRow, ImportRowRequest } from "@/lib/api/types";
 import { toast } from "sonner";
 
@@ -270,6 +272,7 @@ export default function ImportsPage() {
     alreadyImported?: boolean;
   } | null>(null);
 
+  const { user } = useAuth();
   const parseMutation = useParseCsvImport();
   const executeMutation = useExecuteImport();
   const { data: allProjects = [] } = useProjects();
@@ -454,6 +457,15 @@ export default function ImportsPage() {
   const includedCount = rows.filter((r) => r.include).length;
   const totalCount = rows.length;
   const errorRowCount = rows.filter((r) => r.errors.length > 0).length;
+
+  if (!hasRole(TRACKER_ROLES, user?.role)) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-semibold tracking-tight">Import</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Your role cannot import time entries.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6 p-6">

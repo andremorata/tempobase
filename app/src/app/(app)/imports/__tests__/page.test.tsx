@@ -19,6 +19,10 @@ vi.mock("@/lib/api/hooks/imports", () => ({
   }),
 }));
 
+vi.mock("@/contexts/auth-context", () => ({
+  useAuth: () => ({ user: { role: "Member" } }),
+}));
+
 vi.mock("@/lib/api/hooks/projects", () => ({
   useProjects: () => ({ data: [] }),
 }));

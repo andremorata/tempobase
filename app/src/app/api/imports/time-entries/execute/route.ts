@@ -7,7 +7,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { requireOwnerOrAdmin, getCurrentTenantId, getCurrentUserId, authErrorResponse } from "@/lib/auth/helpers";
+import { requireTracker, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
+import { getMemberAccess, isProjectAccessible, isTaskAccessible } from "@/lib/auth/access";
 
 const ImportRowSchema = z.object({
   rowIndex: z.number().int(),
@@ -33,9 +34,11 @@ type StoredImportPreviewRow = {
 
 export async function POST(request: NextRequest) {
   try {
-    await requireOwnerOrAdmin();
+    await requireTracker();
     const accountId = await getCurrentTenantId();
-    const userId = await getCurrentUserId();
+    const user = await getCurrentUser();
+    const userId = user.id;
+    const access = await getMemberAccess(userId, accountId, user.role);
 
     const body = await request.json();
     const validated = ExecuteImportSchema.parse(body);
@@ -103,6 +106,15 @@ export async function POST(request: NextRequest) {
       : [];
     const activeProjectIds = new Set(activeProjects.map((project) => project.id));
 
+    const requestedTaskIds = [...new Set(validated.rows.flatMap((row) => row.taskId || []))];
+    const accountTasks = requestedTaskIds.length > 0
+      ? await prisma.projectTask.findMany({
+          where: { id: { in: requestedTaskIds }, accountId, isDeleted: false },
+          select: { id: true, projectId: true },
+        })
+      : [];
+    const taskProjectById = new Map(accountTasks.map((task) => [task.id, task.projectId]));
+
     await prisma.$transaction(async (tx) => {
       for (const row of validated.rows) {
         const previewRow = previewByRowIndex.get(row.rowIndex);
@@ -149,6 +161,16 @@ export async function POST(request: NextRequest) {
         const description = row.description?.trim() || null;
         const projectId = row.projectId || null;
         const taskId = row.taskId || null;
+
+        if (!isProjectAccessible(access, projectId)) {
+          errors.push({ rowIndex: row.rowIndex, message: "You do not have access to this project." });
+          continue;
+        }
+
+        if (taskId && (taskProjectById.get(taskId) !== projectId || !isTaskAccessible(access, taskId))) {
+          errors.push({ rowIndex: row.rowIndex, message: "You do not have access to this task." });
+          continue;
+        }
 
         const existingEntry = await tx.timeEntry.findFirst({
           where: {
