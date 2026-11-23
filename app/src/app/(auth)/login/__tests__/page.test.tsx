@@ -83,6 +83,11 @@ describe("LoginPage", () => {
     ["/integrations/operations/abc", "/integrations/operations/abc"],
     ["//evil.example.com/x", "/dashboard"],
     ["https://evil.example.com/x", "/dashboard"],
+    ["/.//evil.example.com", "/dashboard"],
+    ["/..//evil.example.com", "/dashboard"],
+    ["/x/..//evil.example.com", "/dashboard"],
+    ["/\\evil.example.com", "/dashboard"],
+    ["/x\\y", "/dashboard"],
   ])("returns to next=%s only when it is a same-origin path", async (next, expected) => {
     window.history.replaceState(null, "", `/login?next=${encodeURIComponent(next)}`);
     authUser = { id: "user-1", email: "owner@example.com" };

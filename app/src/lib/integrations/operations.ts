@@ -94,25 +94,31 @@ export function confirmPath(id: string) {
 /** The shape both the integration API and the app return. Names resolve at read time. */
 export async function toOperationView(op: OperationWithToken, now = new Date()) {
   const payload = op.payload as unknown as EntryPayload;
-  const [project, task] = await Promise.all([
+  const [project, task, result] = await Promise.all([
     payload.projectId
       ? prisma.project.findFirst({ where: { id: payload.projectId, accountId: op.accountId }, select: { id: true, name: true } })
       : null,
     payload.taskId
       ? prisma.projectTask.findFirst({ where: { id: payload.taskId, accountId: op.accountId }, select: { id: true, name: true } })
       : null,
+    op.resultEntryId
+      ? prisma.timeEntry.findFirst({ where: { id: op.resultEntryId, accountId: op.accountId }, select: { isDeleted: true } })
+      : null,
   ]);
+  const status = operationStatus(op, now);
   const durationMs = new Date(payload.endTime).getTime() - new Date(payload.startTime).getTime();
 
   return {
     id: op.id,
     kind: op.kind,
-    status: operationStatus(op, now),
+    status,
     expiresAt: op.expiresAt.toISOString(),
     createdAt: op.createdAt.toISOString(),
     confirmedAt: op.confirmedAt?.toISOString() ?? null,
     cancelledAt: op.cancelledAt?.toISOString() ?? null,
     entryId: op.resultEntryId,
+    // Entries are soft-deleted, so a confirmed operation can outlive its entry.
+    entryDeleted: status === "confirmed" && (!result || result.isDeleted),
     entry: {
       startTime: payload.startTime,
       endTime: payload.endTime,

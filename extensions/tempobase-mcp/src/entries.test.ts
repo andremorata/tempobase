@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildEntryPayload, idempotencyKeyFor, localToUtc } from "./entries.ts";
+import { buildEntryPayload, confirmUrlFor, idempotencyKeyFor, localToUtc, nextStepFor } from "./entries.ts";
 
 const SAO_PAULO = "America/Sao_Paulo";
 const NEW_YORK = "America/New_York";
@@ -60,4 +60,19 @@ test("derives the same idempotency key for the same entry and a different one ot
   assert.equal(idempotencyKeyFor(a), idempotencyKeyFor(b));
   assert.notEqual(idempotencyKeyFor(a), idempotencyKeyFor(c));
   assert.match(idempotencyKeyFor(a), /^mcp-[0-9a-f]{32}$/);
+});
+
+test("builds the confirm link on the configured host from the operation id only", () => {
+  const base = new URL("https://tempobase.example.com");
+  assert.equal(
+    confirmUrlFor(base, "5bab0318-4d24-443b-877a-6422bdc1ffe5"),
+    "https://tempobase.example.com/integrations/operations/5bab0318-4d24-443b-877a-6422bdc1ffe5",
+  );
+  assert.equal(new URL(confirmUrlFor(base, "//evil.example.com/x")).host, "tempobase.example.com");
+});
+
+test("tells the agent a deleted result needs a new idempotencyKey", () => {
+  assert.match(nextStepFor({ status: "confirmed", entryDeleted: false }), /entry exists/);
+  assert.match(nextStepFor({ status: "confirmed", entryDeleted: true }), /deleted.*new idempotencyKey/);
+  assert.match(nextStepFor({ status: "cancelled", entryDeleted: false }), /re-opens/);
 });

@@ -77,3 +77,25 @@ export function idempotencyKeyFor(payload: EntryPayload): string {
   ]);
   return `mcp-${createHash("sha256").update(canonical).digest("hex").slice(0, 32)}`;
 }
+
+/** The preview link on the configured host, built from the id so the server response cannot redirect it. */
+export function confirmUrlFor(baseUrl: URL, operationId: string): string {
+  return new URL(`/integrations/operations/${encodeURIComponent(operationId)}`, baseUrl).toString();
+}
+
+export type OperationStatus = "pending" | "confirmed" | "cancelled" | "expired";
+
+export function nextStepFor(op: { status: OperationStatus; entryDeleted: boolean }): string {
+  switch (op.status) {
+    case "pending":
+      return "Nothing is saved yet. Tell the user to review the preview in TempoBase and select Confirm or Cancel, then call get_operation_status with this id.";
+    case "confirmed":
+      return op.entryDeleted
+        ? "The entry was created and later deleted in TempoBase. To create it again, call prepare_time_entry with a new idempotencyKey."
+        : "The entry exists; entryId is its id. Do not prepare it again.";
+    case "cancelled":
+      return "The user cancelled; nothing was saved. If the user asks again, call prepare_time_entry with the same entry: it re-opens the preview.";
+    case "expired":
+      return "The preview expired after 15 minutes; nothing was saved. If the user still wants it, call prepare_time_entry with the same entry: it re-opens the preview.";
+  }
+}

@@ -191,6 +191,18 @@ describe("integration operations", () => {
       });
     });
 
+    it("returns the winner when a concurrent retry inserts the same key first", async () => {
+      const { body: first } = await prepareEntry(tokens.member);
+      // The second request looked before the first one's insert committed.
+      vi.spyOn(state.db.prisma.integrationOperation, "findUnique").mockResolvedValueOnce(null);
+
+      const { status, body } = await prepareEntry(tokens.member);
+
+      expect(status).toBe(200);
+      expect(body.id).toBe(first.id);
+      expect(state.db.operations).toHaveLength(1);
+    });
+
     it("keeps keys per token", async () => {
       const admin = await prepareEntry(tokens.admin);
       const member = await prepareEntry(tokens.member);
@@ -273,6 +285,17 @@ describe("integration operations", () => {
         operationId: op.id,
         projectId: ids.projectA1,
       });
+    });
+
+    it("reports a confirmed entry that was deleted afterwards", async () => {
+      const { body: op } = await prepareEntry(tokens.member);
+      expect((await statusOf(tokens.member, op.id)).body.entryDeleted).toBe(false);
+      const { body: confirmed } = await confirmAs(ids.memberA, op.id);
+      expect(confirmed.entryDeleted).toBe(false);
+
+      state.db.timeEntries.find((e) => e.id === confirmed.entryId)!.isDeleted = true;
+
+      expect((await statusOf(tokens.member, op.id)).body).toMatchObject({ status: "confirmed", entryId: confirmed.entryId, entryDeleted: true });
     });
 
     it("creates one entry for a double confirm, also when concurrent", async () => {

@@ -158,7 +158,11 @@ function OperationCard({ op, dateFormat }: { op: IntegrationOperation; dateForma
             <state.icon className="mt-0.5 h-4 w-4 shrink-0" />
             <div className="space-y-1">
               <p className="text-sm font-medium">{state.title}</p>
-              <p className="text-sm opacity-90">{state.body}</p>
+              <p className="text-sm opacity-90">
+                {viewState === "confirmed" && op.entryDeleted
+                  ? "This entry was saved and later deleted from your timesheet."
+                  : state.body}
+              </p>
             </div>
           </div>
         )}

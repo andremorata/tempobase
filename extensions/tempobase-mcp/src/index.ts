@@ -4,7 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { apiGet, apiPost, loadConfig } from "./client.ts";
-import { buildEntryPayload, idempotencyKeyFor } from "./entries.ts";
+import { buildEntryPayload, confirmUrlFor, idempotencyKeyFor, nextStepFor, type OperationStatus } from "./entries.ts";
 import { formatLocal, PRESETS, resolvePeriod } from "./period.ts";
 
 const config = loadConfig();
@@ -104,29 +104,21 @@ server.registerTool(
 
 interface Operation {
   id: string;
-  status: "pending" | "confirmed" | "cancelled" | "expired";
+  status: OperationStatus;
   entryId: string | null;
+  entryDeleted: boolean;
   confirmUrl: string;
   entry: { startTime: string; endTime: string };
 }
 
-const NEXT_STEP: Record<Operation["status"], string> = {
-  pending:
-    "Nothing is saved yet. Tell the user to review the preview in TempoBase and select Confirm or Cancel, then call get_operation_status with this id.",
-  confirmed: "The entry exists; entryId is its id. Do not prepare it again.",
-  cancelled: "The user cancelled; nothing was saved. If the user asks again, call prepare_time_entry with the same entry: it re-opens the preview.",
-  expired: "The preview expired after 15 minutes; nothing was saved. If the user still wants it, call prepare_time_entry with the same entry: it re-opens the preview.",
-};
-
 /** Local times for the agent, and a confirm link on the configured host only. */
 function describeOperation(op: Operation) {
-  const confirmUrl = new URL(new URL(op.confirmUrl).pathname, config.baseUrl).toString();
   return {
     timeZone: config.timeZone,
     ...op,
-    confirmUrl,
+    confirmUrl: confirmUrlFor(config.baseUrl, op.id),
     entry: { ...op.entry, startLocal: formatLocal(op.entry.startTime, config.timeZone), endLocal: formatLocal(op.entry.endTime, config.timeZone) },
-    nextStep: NEXT_STEP[op.status],
+    nextStep: nextStepFor(op),
   };
 }
 
@@ -153,7 +145,7 @@ server.registerTool(
         .min(1)
         .max(100)
         .optional()
-        .describe("Omit normally: it is derived from the entry. Pass a new value only to prepare the same entry twice on purpose."),
+        .describe("Omit normally: it is derived from the entry. Pass a new value only to prepare the same entry twice on purpose, or to create again an entry that was confirmed and later deleted."),
     },
   },
   (args) =>

@@ -295,6 +295,8 @@ export interface IntegrationOperation {
   confirmedAt: string | null;
   cancelledAt: string | null;
   entryId: string | null;
+  /** True when the operation was confirmed and its entry was deleted afterwards. */
+  entryDeleted: boolean;
   entry: {
     startTime: string;
     endTime: string;

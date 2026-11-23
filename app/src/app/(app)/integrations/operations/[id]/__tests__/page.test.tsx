@@ -31,6 +31,7 @@ function operation(overrides: Partial<IntegrationOperation> = {}, tokenUsable = 
     confirmedAt: null,
     cancelledAt: null,
     entryId: null,
+    entryDeleted: false,
     entry: {
       startTime: "2026-11-20T17:00:00.000Z",
       endTime: "2026-11-20T18:30:00.000Z",
@@ -106,5 +107,12 @@ describe("IntegrationOperationPage", () => {
 
     expect(screen.getByRole("heading", { name: "Entry request not found" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Go to tracker" })).toHaveAttribute("href", "/tracker");
+  });
+
+  it("says when the confirmed entry was deleted later", async () => {
+    hooks.op = operation({ status: "confirmed", entryId: "e1", entryDeleted: true });
+    await renderPage();
+
+    expect(screen.getByText("This entry was saved and later deleted from your timesheet.")).toBeInTheDocument();
   });
 });

@@ -3,6 +3,7 @@
  * assert real isolation outcomes instead of where-clause shapes.
  */
 
+import { Prisma } from "@prisma/client";
 import { hashIntegrationToken } from "@/lib/auth/integration-tokens";
 
 type Filter = string | boolean | null | { in?: string[]; gte?: Date; lte?: Date; contains?: string };
@@ -167,6 +168,9 @@ export function createFakeDb(now: Date) {
       findFirst: async ({ where }: { where: Where }) => withToken(operations.find((o) => opMatches(o, where))),
       findUniqueOrThrow: async ({ where }: { where: { id: string } }) => withToken(operations.find((o) => o.id === where.id))!,
       create: async ({ data }: { data: Record<string, unknown> }) => {
+        if (operations.some((o) => o.tokenId === data.tokenId && o.idempotencyKey === data.idempotencyKey)) {
+          throw new Prisma.PrismaClientKnownRequestError("Unique constraint failed", { code: "P2002", clientVersion: "fake" });
+        }
         const row = {
           id: `00000000-0000-4000-8000-${String(operations.length + 1).padStart(12, "0")}`,
           status: "pending",
@@ -240,6 +244,7 @@ export function createFakeDb(now: Date) {
         return row;
       },
       findUniqueOrThrow: async ({ where }: { where: { id: string } }) => ({ ...timeEntries.find((e) => e.id === where.id)!, tags: [] }),
+      findFirst: async ({ where }: { where: Where }) => timeEntries.find((e) => matchesWhere(e, where)) ?? null,
       findMany: async ({
         where,
         skip = 0,
