@@ -48,17 +48,18 @@ export async function GET(request: NextRequest) {
         tasks: { where: taskWhere, select: { id: true, name: true, isActive: true }, orderBy: { name: "asc" } },
       },
       orderBy: { name: "asc" },
-      take: query.limit,
+      take: query.limit + 1,
     });
 
     return NextResponse.json({
-      projects: projects.map((p) => ({
+      projects: projects.slice(0, query.limit).map((p) => ({
         id: p.id,
         name: p.name,
         status: p.status,
         clientName: p.client?.name ?? null,
         tasks: p.tasks,
       })),
+      hasMore: projects.length > query.limit,
     });
   } catch (error) {
     return integrationErrorResponse(error, "search projects");

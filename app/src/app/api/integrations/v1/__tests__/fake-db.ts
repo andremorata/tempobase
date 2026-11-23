@@ -30,11 +30,13 @@ export const ids = {
   adminA: "aaaaaaaa-1111-4000-8000-000000000001",
   memberA: "aaaaaaaa-1111-4000-8000-000000000002",
   memberA2: "aaaaaaaa-1111-4000-8000-000000000003",
+  memberTaskA: "aaaaaaaa-1111-4000-8000-000000000004",
   ownerB: "bbbbbbbb-1111-4000-8000-000000000001",
   projectA1: "aaaaaaaa-2222-4000-8000-000000000001",
   projectA2: "aaaaaaaa-2222-4000-8000-000000000002",
   projectB: "bbbbbbbb-2222-4000-8000-000000000001",
   taskA1: "aaaaaaaa-3333-4000-8000-000000000001",
+  taskA2: "aaaaaaaa-3333-4000-8000-000000000002",
   taskB: "bbbbbbbb-3333-4000-8000-000000000001",
   missing: "99999999-9999-4999-8999-999999999999",
 };
@@ -50,6 +52,7 @@ export function createFakeDb(now: Date) {
     { id: ids.adminA, accountId: ids.acctA, role: "Admin", isActive: true, isDeleted: false, canViewAmounts: true },
     { id: ids.memberA, accountId: ids.acctA, role: "Member", isActive: true, isDeleted: false, canViewAmounts: false },
     { id: ids.memberA2, accountId: ids.acctA, role: "Member", isActive: true, isDeleted: false, canViewAmounts: false },
+    { id: ids.memberTaskA, accountId: ids.acctA, role: "Member", isActive: true, isDeleted: false, canViewAmounts: false },
     { id: ids.ownerB, accountId: ids.acctB, role: "Owner", isActive: true, isDeleted: false, canViewAmounts: true },
   ];
   const projects = [
@@ -59,9 +62,12 @@ export function createFakeDb(now: Date) {
   ];
   const tasks = [
     { id: ids.taskA1, accountId: ids.acctA, projectId: ids.projectA1, name: "Code review", isActive: true, hourlyRate: 120, isDeleted: false },
+    { id: ids.taskA2, accountId: ids.acctA, projectId: ids.projectA2, name: "Planning", isActive: true, hourlyRate: null, isDeleted: false },
     { id: ids.taskB, accountId: ids.acctB, projectId: ids.projectB, name: "Code review B", isActive: true, hourlyRate: 999, isDeleted: false },
   ];
+  // memberA: restricted by project, no task rows. memberTaskA: restricted by task only.
   const projectAccess = [{ userId: ids.memberA, accountId: ids.acctA, projectId: ids.projectA1 }];
+  const taskAccess = [{ userId: ids.memberTaskA, accountId: ids.acctA, taskId: ids.taskA1 }];
 
   let n = 0;
   const entry = (userId: string, accountId: string, date: string, hours: number, extra: Record<string, unknown> = {}) => ({
@@ -89,6 +95,7 @@ export function createFakeDb(now: Date) {
     entry(ids.adminA, ids.acctA, "2026-11-21", 0, { projectId: ids.projectA2, isRunning: true, endTime: null, durationDecimal: null }),
     entry(ids.memberA, ids.acctA, "2026-11-20", 2, { projectId: ids.projectA1 }),
     entry(ids.memberA2, ids.acctA, "2026-11-20", 3, { projectId: ids.projectA2 }),
+    entry(ids.memberTaskA, ids.acctA, "2026-11-20", 1, { projectId: ids.projectA1, taskId: ids.taskA1 }),
     entry(ids.ownerB, ids.acctB, "2026-11-20", 4, { projectId: ids.projectB, taskId: ids.taskB, description: "Review PR #42" }),
   ];
 
@@ -135,27 +142,57 @@ export function createFakeDb(now: Date) {
       findMany: async ({ where }: { where: { userId: string; accountId: string } }) =>
         projectAccess.filter((a) => a.userId === where.userId && a.accountId === where.accountId),
     },
-    userTaskAccess: { findMany: async () => [] },
+    userTaskAccess: {
+      findMany: async ({ where }: { where: { userId: string; accountId: string } }) =>
+        taskAccess.filter((a) => a.userId === where.userId && a.accountId === where.accountId),
+    },
     project: {
       count: async ({ where }: { where: Where }) => projects.filter((p) => matchesWhere(p, where)).length,
-      findMany: async ({ where, take }: { where: Where & { OR?: Where[] }; take?: number }) => {
+      findMany: async ({
+        where,
+        take,
+        select,
+      }: {
+        where: Where & { OR?: Where[] };
+        take?: number;
+        select: { tasks: { where: Where } };
+      }) => {
         const q = (where.OR?.[0]?.name as { contains: string } | undefined)?.contains.toLowerCase();
         const taskWhere = (where.OR?.[1]?.tasks as { some: Where } | undefined)?.some;
         return projects
           .filter((p) => matchesWhere(p, where))
           .filter((p) => !q || p.name.toLowerCase().includes(q) || filterTasks(p.id, taskWhere).length > 0)
           .slice(0, take)
-          .map((p) => ({ ...p, tasks: filterTasks(p.id, { isDeleted: false }).map(({ id, name, isActive }) => ({ id, name, isActive })) }));
+          .map((p) => ({ ...p, tasks: filterTasks(p.id, select.tasks.where).map(({ id, name, isActive }) => ({ id, name, isActive })) }));
       },
     },
     projectTask: {
       count: async ({ where }: { where: Where }) => tasks.filter((t) => matchesWhere(t, where)).length,
+      findFirst: async ({ where }: { where: Where }) => tasks.find((t) => matchesWhere(t, where)) ?? null,
     },
     timeEntry: {
-      findMany: async ({ where, skip = 0, take }: { where: Where; skip?: number; take?: number }) =>
+      findMany: async ({
+        where,
+        skip = 0,
+        take,
+        orderBy = [],
+      }: {
+        where: Where;
+        skip?: number;
+        take?: number;
+        orderBy?: Array<Record<string, "asc" | "desc">>;
+      }) =>
         timeEntries
           .filter((e) => matchesWhere(e, where))
-          .sort((a, b) => b.entryDate.getTime() - a.entryDate.getTime() || b.startTime.getTime() - a.startTime.getTime())
+          .sort((a, b) => {
+            for (const rule of orderBy) {
+              const [key, dir] = Object.entries(rule)[0]!;
+              const [x, y] = [a[key as keyof typeof a], b[key as keyof typeof b]];
+              const diff = x instanceof Date && y instanceof Date ? x.getTime() - y.getTime() : String(x).localeCompare(String(y));
+              if (diff !== 0) return dir === "desc" ? -diff : diff;
+            }
+            return 0;
+          })
           .slice(skip, take === undefined ? undefined : skip + take)
           .map(withRelations),
     },

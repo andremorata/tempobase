@@ -8,8 +8,8 @@
     "tempobase-mcp": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc",
     "test": "node --test src/*.test.ts",
     "start": "node dist/index.js"
   },

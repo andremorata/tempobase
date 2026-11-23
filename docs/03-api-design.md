@@ -51,12 +51,13 @@ Personal read tokens let the local TempoBase MCP (`extensions/tempobase-mcp`) ca
 | POST | `/api/account/integration-tokens` | Session | Issue a `read` token: `{ name, expiresInDays }` (1 to 90, default 30). Returns the plain token once. Audited. |
 | DELETE | `/api/account/integration-tokens/[id]` | Session | Revoke one of the caller's tokens. Audited. |
 | GET | `/api/integrations/v1/hours` | Bearer | Total and billable hours: `from`, `to` (YYYY-MM-DD, required), `projectId`, `taskId`, `description`, `roundUp` |
-| GET | `/api/integrations/v1/projects` | Bearer | Accessible projects and their registered tasks: `q`, `limit` (max 100) |
-| GET | `/api/integrations/v1/time-entries` | Bearer | The caller's own entries, newest first: `from`, `to`, `projectId`, `taskId`, `description`, `page`, `pageSize` (max 100); returns `hasMore` |
+| GET | `/api/integrations/v1/projects` | Bearer | Accessible projects and their accessible registered tasks: `q`, `limit` (default 50, max 100); returns `hasMore` |
+| GET | `/api/integrations/v1/time-entries` | Bearer | The caller's own entries, newest first (ties broken by id): `from`, `to`, `projectId`, `taskId`, `description`, `page`, `pageSize` (max 100); returns `hasMore` |
 
 - Tokens look like `tbp_<43 base64url chars>`. Only the SHA-256 hex hash is stored.
 - `authenticateIntegration` in `app/src/lib/auth/integration-tokens.ts` runs on every call. It rejects unknown, expired or revoked tokens, inactive or removed users and deleted accounts with 401, and a missing scope with 403. It then re-reads project/task access with `getMemberAccess`.
-- Integration routes always scope entries to the token owner, also for Owner and Admin. A `projectId` or `taskId` outside the caller's account or access returns 404.
+- Integration routes always scope entries to the token owner, also for Owner and Admin. A `projectId` or `taskId` outside the caller's account or access returns 404. A task is in scope only when its project is too, and it must belong to `projectId` when both are given.
+- `from` and `to` must be real calendar dates (`YYYY-MM-DD`); anything else returns 400.
 - `hours` uses the Summary report aggregation (`app/src/lib/reports/summary.ts`), so it matches `/api/reports/summary?userId=<owner>` for the same period, filters and `roundUp`.
 - Integration responses never contain amounts or rates.
 

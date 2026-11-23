@@ -35,7 +35,7 @@ async function json(handler: (r: NextRequest) => Promise<Response>, path: string
 const WEEK = "from=2026-11-16&to=2026-11-22";
 
 describe("integration API", () => {
-  let tokens: Record<"adminA" | "memberA" | "memberA2" | "ownerB" | "expired" | "revoked", string>;
+  let tokens: Record<"adminA" | "memberA" | "memberA2" | "memberTaskA" | "ownerB" | "expired" | "revoked", string>;
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -48,6 +48,7 @@ describe("integration API", () => {
       adminA: add(ids.adminA),
       memberA: add(ids.memberA),
       memberA2: add(ids.memberA2),
+      memberTaskA: add(ids.memberTaskA),
       ownerB: add(ids.ownerB),
       expired: add(ids.adminA, { expiresAt: new Date(NOW.getTime() - 1) }),
       revoked: add(ids.adminA, { revokedAt: new Date(NOW.getTime() - 1000) }),
@@ -149,6 +150,38 @@ describe("integration API", () => {
     });
   });
 
+  describe("project and task scope", () => {
+    const routes = [
+      ["hours", getHours, `/api/integrations/v1/hours?${WEEK}`],
+      ["time entries", getEntries, `/api/integrations/v1/time-entries?${WEEK}`],
+    ] as const;
+
+    it.each([
+      ["a task in a project outside a project-restricted member's access", "memberA", `taskId=${ids.taskA2}`],
+      ["a task outside a task-restricted member's access", "memberTaskA", `taskId=${ids.taskA2}`],
+      ["a task that belongs to another project than projectId", "adminA", `projectId=${ids.projectA1}&taskId=${ids.taskA2}`],
+    ] as const)("returns 404 for %s", async (_label, who, filter) => {
+      for (const [, handler, path] of routes) {
+        expect((await call(handler, `${path}&${filter}`, tokens[who])).status).toBe(404);
+      }
+    });
+
+    it.each([
+      ["a project-restricted member", "memberA", `taskId=${ids.taskA1}`],
+      ["a task-restricted member", "memberTaskA", `taskId=${ids.taskA1}`],
+      ["an admin with a matching project and task", "adminA", `projectId=${ids.projectA1}&taskId=${ids.taskA1}`],
+    ] as const)("accepts an in-scope task for %s", async (_label, who, filter) => {
+      for (const [, handler, path] of routes) {
+        expect((await call(handler, `${path}&${filter}`, tokens[who])).status).toBe(200);
+      }
+    });
+
+    it.each(["2026-13-01", "2026-02-30", "2026-1-01"])("rejects the impossible date %s with 400", async (date) => {
+      expect((await call(getHours, `/api/integrations/v1/hours?from=${date}&to=2026-12-31`, tokens.adminA)).status).toBe(400);
+      expect((await call(getEntries, `/api/integrations/v1/time-entries?from=${date}`, tokens.adminA)).status).toBe(400);
+    });
+  });
+
   describe("search projects", () => {
     it("returns the account's projects and tasks without rates", async () => {
       const { body } = await json(getProjects, "/api/integrations/v1/projects", tokens.adminA);
@@ -166,6 +199,23 @@ describe("integration API", () => {
     it("limits a restricted member to accessible projects", async () => {
       const { body } = await json(getProjects, "/api/integrations/v1/projects", tokens.memberA);
       expect(body.projects.map((p: { id: string }) => p.id)).toEqual([ids.projectA1]);
+    });
+
+    it("returns only the tasks a task-restricted member can access", async () => {
+      const { body } = await json(getProjects, "/api/integrations/v1/projects", tokens.memberTaskA);
+      expect(body.projects.map((p: { name: string; tasks: { id: string }[] }) => [p.name, p.tasks.map((t) => t.id)])).toEqual([
+        ["Alpha", [ids.taskA1]],
+        ["Beta", []],
+      ]);
+    });
+
+    it("reports whether more projects exist beyond the limit", async () => {
+      const first = await json(getProjects, "/api/integrations/v1/projects?limit=1", tokens.adminA);
+      expect(first.body.projects).toHaveLength(1);
+      expect(first.body.hasMore).toBe(true);
+
+      const all = await json(getProjects, "/api/integrations/v1/projects?limit=2", tokens.adminA);
+      expect(all.body.hasMore).toBe(false);
     });
 
     it("matches project or task names", async () => {
@@ -203,6 +253,12 @@ describe("integration API", () => {
       const a2 = await json(getEntries, "/api/integrations/v1/time-entries?userId=" + ids.adminA, tokens.memberA2);
       expect(a2.body.entries).toHaveLength(1);
       expect(a2.body.entries[0].project.id).toBe(ids.projectA2);
+    });
+
+    it("breaks ties on equal date and start time by id, so pages stay stable", async () => {
+      const { body } = await json(getEntries, "/api/integrations/v1/time-entries?from=2026-11-20&to=2026-11-20", tokens.adminA);
+      // Both entries start at 09:00; the later id comes first.
+      expect(body.entries.map((e: { description: string }) => e.description)).toEqual(["standup", "Review PR #42"]);
     });
 
     it("paginates", async () => {

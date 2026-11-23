@@ -7,8 +7,8 @@ Local `stdio` MCP server that reads your own TempoBase hours and time entries. I
 | Tool | What it returns |
 | --- | --- |
 | `get_my_hours` | Total and billable hours for a period, per project. The server computes them with the Summary report logic. Filters: `projectId`, `taskId`, `description`, `roundUp` (off by default). |
-| `search_projects` | Projects and registered tasks you can access, matched by name. Use the ids in the other tools. |
-| `list_my_time_entries` | Your own entries, newest first and paginated: id, date, start/end, description, project, task, billable, running. |
+| `search_projects` | Projects and registered tasks you can access, matched by name. `limit` defaults to 50; `hasMore` says whether more matched. Use the ids in the other tools. |
+| `list_my_time_entries` | Your own entries, newest first and paginated: id, date, start/end in UTC (`startTime`, `endTime`) and in your timezone (`startLocal`, `endLocal`, `YYYY-MM-DD HH:mm`), description, project, task, billable, running. |
 
 Periods take a `preset` (`today`, `yesterday`, `this_week`, `last_week`, `this_month`, `last_month`; weeks start on Monday) or `from`/`to` dates (`YYYY-MM-DD`). Presets resolve in `TEMPOBASE_TIMEZONE`, or the Mac's timezone when unset.
 
@@ -32,7 +32,7 @@ The command prompts for the token, so it stays out of your shell history. Use an
 
 ## 3. Build
 
-Requires Node.js 22.18 or newer.
+Requires Node.js 22.18 or newer. Requests time out after 15 seconds.
 
 ```bash
 cd extensions/tempobase-mcp

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { localDate, resolvePeriod } from "./period.ts";
+import { formatLocal, localDate, resolvePeriod } from "./period.ts";
 
 const SAO_PAULO = "America/Sao_Paulo";
 // Friday 2026-11-20 23:30 in Sao Paulo (UTC-3) is already Saturday 02:30 in UTC.
@@ -59,4 +59,11 @@ test("rejects ambiguous or invalid periods", () => {
   assert.throws(() => resolvePeriod({ from: "2026-11-15", to: "2026-11-01" }, FRIDAY_LATE, SAO_PAULO), /on or before/);
   assert.throws(() => resolvePeriod({ from: "2026-02-30" }, FRIDAY_LATE, SAO_PAULO), /YYYY-MM-DD/);
   assert.throws(() => localDate(FRIDAY_LATE, "Mars/Olympus"), RangeError);
+});
+
+test("formats instants as local wall time in the configured timezone", () => {
+  assert.equal(formatLocal("2026-11-21T02:30:00.000Z", SAO_PAULO), "2026-11-20 23:30");
+  assert.equal(formatLocal("2026-11-21T02:30:00.000Z", "UTC"), "2026-11-21 02:30");
+  assert.equal(formatLocal("2026-11-20T15:00:00.000Z", "Asia/Tokyo"), "2026-11-21 00:00");
+  assert.equal(formatLocal(null, SAO_PAULO), null);
 });

@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
         project: { select: { id: true, name: true } },
         task: { select: { id: true, name: true } },
       },
-      orderBy: [{ entryDate: "desc" }, { startTime: "desc" }],
+      orderBy: [{ entryDate: "desc" }, { startTime: "desc" }, { id: "desc" }],
       skip: (query.page - 1) * query.pageSize,
       take: query.pageSize + 1,
     });
