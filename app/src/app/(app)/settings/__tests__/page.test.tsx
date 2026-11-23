@@ -193,6 +193,10 @@ vi.mock("@/lib/api/hooks/account", () => ({
   usePurgeTimeEntries: () => ({ mutateAsync: mockPurgeTimeEntries, isPending: false }),
 }));
 
+vi.mock("@/components/settings/integration-tokens-card", () => ({
+  IntegrationTokensCard: () => null,
+}));
+
 vi.mock("@/lib/api/hooks/team", () => ({
   useTeamMembers: () => ({
     data: teamMembersData,

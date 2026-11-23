@@ -55,14 +55,21 @@ export async function POST(request: NextRequest) {
     // Hash new password
     const newPasswordHash = await bcrypt.hash(validated.newPassword, 10);
 
-    // Update password
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        passwordHash: newPasswordHash,
-        updatedAt: new Date(),
-      },
-    });
+    // Update password. Like sessions, integration tokens die with the old password.
+    const now = new Date();
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: userId },
+        data: {
+          passwordHash: newPasswordHash,
+          updatedAt: now,
+        },
+      }),
+      prisma.integrationToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: now, updatedAt: now },
+      }),
+    ]);
 
     return NextResponse.json({ success: true });
   } catch (error) {

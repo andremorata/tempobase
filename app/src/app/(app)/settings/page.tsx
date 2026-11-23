@@ -35,6 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { IntegrationTokensCard } from "@/components/settings/integration-tokens-card";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
 import {
@@ -721,6 +722,8 @@ export default function SettingsPage() {
           </Button>
         </CardContent>
       </Card>
+
+      {user && <IntegrationTokensCard />}
 
       {isAccountAdmin && (
         <Card>

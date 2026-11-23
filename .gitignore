@@ -79,3 +79,4 @@ worktrees/
 test-results/
 
 extensions/tempobase-chrome/dist/
+extensions/tempobase-mcp/dist/

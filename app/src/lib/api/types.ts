@@ -260,6 +260,28 @@ export interface SharedReportResponse {
   createdAt: string;
 }
 
+// ─── Integration tokens ───────────────────────────────────────────────────
+
+export interface IntegrationToken {
+  id: string;
+  name: string;
+  tokenPrefix: string;
+  scopes: string[];
+  expiresAt: string;
+  lastUsedAt?: string | null;
+  createdAt: string;
+}
+
+export interface CreatedIntegrationToken extends IntegrationToken {
+  /** Plain token, returned only once at creation. */
+  token: string;
+}
+
+export interface CreateIntegrationTokenRequest {
+  name: string;
+  expiresInDays: number;
+}
+
 // ─── Account & Profile ─────────────────────────────────────────────────────
 
 export interface AccountSettings {

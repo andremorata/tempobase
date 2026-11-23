@@ -27,6 +27,7 @@
 | Imports | `import_sessions` |
 | Reporting | `saved_reports`, `shared_reports` |
 | Audit | `audit_logs` |
+| Integrations | `integration_tokens` |
 
 ## 4. Auth Data Expectations
 
@@ -52,6 +53,8 @@ erDiagram
   ACCOUNTS ||--o{ SAVED_REPORTS : owns
   ACCOUNTS ||--o{ SHARED_REPORTS : owns
   ACCOUNTS ||--o{ AUDIT_LOGS : owns
+  ACCOUNTS ||--o{ INTEGRATION_TOKENS : owns
+  DOMAIN_USERS ||--o{ INTEGRATION_TOKENS : issues
 
   CLIENTS ||--o{ PROJECTS : groups
   PROJECTS ||--o{ PROJECT_TASKS : contains
@@ -83,6 +86,13 @@ erDiagram
 - `file_name` is stored only as audit/display metadata. It must not be used as the identity or lookup key for import data.
 - `preview_rows_json` preserves the parsed preview used by the execute step, and imported `time_entries` may reference the originating `import_session_id`.
 - Duplicate-content detection is scoped to completed sessions for the same account/user/date format and should warn before reimporting the same content.
+
+### Integration Tokens
+
+- `integration_tokens` holds personal tokens for the local MCP. `token_hash` is the SHA-256 hex of the token and is unique; the plain token is never stored. `token_prefix` keeps the first 12 characters for display.
+- `scopes` is a text array. Only `read` is issued today.
+- `expires_at` is required (at most 90 days from issue). Revocation sets `revoked_at`; rows are not deleted. `last_used_at` is updated on each authenticated call.
+- The user relation uses `(account_id, user_id)` against `domain_users (account_id, id)`, so a token owner always belongs to the token's account.
 
 ## 7. Migration Strategy
 
