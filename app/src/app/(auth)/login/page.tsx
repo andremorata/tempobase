@@ -33,7 +33,12 @@ type FormValues = z.infer<typeof schema>;
 function returnPath(): string | null {
   const next = new URLSearchParams(window.location.search).get("next");
   if (!next?.startsWith("/") || next.includes("\\")) return null;
-  const url = new URL(next, window.location.origin);
+  let url: URL;
+  try {
+    url = new URL(next, window.location.origin);
+  } catch {
+    return null; // e.g. "//[" has an invalid host
+  }
   // A normalized path starting with "//" (e.g. from "/.//host") is protocol-relative to the router.
   if (url.origin !== window.location.origin || url.pathname.startsWith("//")) return null;
   return url.pathname + url.search;

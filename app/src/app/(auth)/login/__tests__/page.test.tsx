@@ -87,6 +87,8 @@ describe("LoginPage", () => {
     ["/..//evil.example.com", "/dashboard"],
     ["/x/..//evil.example.com", "/dashboard"],
     ["/\\evil.example.com", "/dashboard"],
+    ["//[", "/dashboard"],
+    ["//x:99999", "/dashboard"],
     ["/x\\y", "/dashboard"],
   ])("returns to next=%s only when it is a same-origin path", async (next, expected) => {
     window.history.replaceState(null, "", `/login?next=${encodeURIComponent(next)}`);
