@@ -63,6 +63,7 @@ model Account {
   userProjectAccess    UserProjectAccess[]
   userTaskAccess       UserTaskAccess[]
   importSessions       ImportSession[]
+  integrationTokens    IntegrationToken[]
 
   @@map("accounts")
 }
@@ -100,6 +101,7 @@ model User {
   projectAccess        UserProjectAccess[]
   taskAccess           UserTaskAccess[]
   importSessions       ImportSession[]
+  integrationTokens    IntegrationToken[]
 
   @@unique([accountId, id])
   // One active account per email across workspaces. Emails are stored lowercase;
@@ -434,4 +436,33 @@ model UserTaskAccess {
   @@index([accountId])
   @@index([userId])
   @@map("user_task_access")
+}
+
+// ─── Integrations ─────────────────────────────────────────────────────────────
+
+// Personal token for local integrations (TempoBase MCP). Only the SHA-256 hash is stored;
+// the plain token is shown once at creation.
+model IntegrationToken {
+  id                   String    @id @default(uuid()) @db.Uuid
+  accountId            String    @map("account_id") @db.Uuid
+  userId               String    @map("user_id") @db.Uuid
+  name                 String    @db.VarChar(100)
+  tokenHash            String    @unique @map("token_hash") @db.VarChar(64)
+  tokenPrefix          String    @map("token_prefix") @db.VarChar(20)
+  scopes               String[]
+  expiresAt            DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt            DateTime? @map("revoked_at") @db.Timestamptz
+  lastUsedAt           DateTime? @map("last_used_at") @db.Timestamptz
+
+  // Audit fields
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime? @map("updated_at") @db.Timestamptz
+
+  // Relations
+  account              Account   @relation(fields: [accountId], references: [id])
+  // Composite key keeps the token owner inside the token's account at the database level.
+  user                 User      @relation(fields: [accountId, userId], references: [accountId, id])
+
+  @@index([accountId, userId])
+  @@map("integration_tokens")
 }

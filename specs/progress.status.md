@@ -23,6 +23,7 @@ This file captures the current operating posture of the repository. It is not th
 - Vercel Firewall rule `Rate limit password endpoints` (configured in the Vercel dashboard, not in the repo): 10 POSTs per minute per IP on login, registration, password change and self-deletion.
 - Unique index `domain_users_email_active_key` on `email` for active users (Prisma `partialIndexes` preview).
 - Security hardening from the 2026-10-26 audit: server-side role enforcement per the permissions matrix, per-request session revalidation, Member scoping to own entries, cross-account id checks, shared-link scoping, invite and Owner-role rules, CSV formula escaping, no default `NEXTAUTH_SECRET` in Docker files, and `next` 16.4.3 plus dependency overrides for audit findings.
+- Local MCP read access (issue #24): personal read tokens in `integration_tokens` (hash only, expiring, revocable, revoked on password change), Bearer routes under `/api/integrations/v1/*`, a Settings > Integrations card, and the `extensions/tempobase-mcp` stdio server (`get_my_hours`, `search_projects`, `list_my_time_entries`). Summary report round-up now rounds per entry, matching the Reports page.
 - CSV import reopened to Manager and Member: entries stay owned by the importer, rows outside the user's project/task access are flagged on parse and rejected on execute, and execute now rejects task ids from another account or project.
 
 ## Validation Snapshot
@@ -43,6 +44,9 @@ Latest local checks from the repository root:
 - Run a deliberate final readiness gate after the current restructuring settles.
 - Create GitHub Issues for any remaining production-hardening work that should continue beyond this cleanup.
 - Viewers still see the tracker UI; the API rejects their writes with 403.
+- `time_entries.entry_date` is derived with `setHours(0,0,0,0)` in the server's timezone when entries are created or updated, not the user's timezone. Reports and the MCP filter by this stored date.
+- The Reports page rounds per entry from the Detailed report, capped at 500 entries per period.
+- The Reports page has no user filter, so Owner, Admin and Manager cannot compare their own totals there with the MCP; use `/api/reports/summary?userId=`.
 - `pnpm audit` keeps one high finding: `zod` 3 inside the `shadcn` CLI. No patched 3.x exists and forcing zod 4 breaks the CLI. It never runs in the app.
 
 ## Notes For Agents

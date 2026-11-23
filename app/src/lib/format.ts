@@ -65,6 +65,22 @@ export function formatDate(dateStr: string): string {
   });
 }
 
+export type DateFormatPreference = "system" | "ymd" | "dmy" | "mdy";
+
+/**
+ * Format an ISO date in the browser's local timezone using the user's date-format setting.
+ */
+export function formatDateByPreference(dateStr: string, preference: DateFormatPreference = "system"): string {
+  const date = new Date(dateStr);
+  if (preference === "system") return date.toLocaleDateString();
+  const year = String(date.getFullYear());
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  if (preference === "dmy") return `${day}/${month}/${year}`;
+  if (preference === "mdy") return `${month}/${day}/${year}`;
+  return `${year}-${month}-${day}`;
+}
+
 /**
  * Format an ISO datetime to time-only display (HH:MM).
  */
