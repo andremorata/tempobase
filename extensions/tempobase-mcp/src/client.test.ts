@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { apiGet, loadConfig } from "./client.ts";
+import { apiGet, apiPost, loadConfig } from "./client.ts";
 
 test("requires TEMPOBASE_URL", () => {
   assert.throws(() => loadConfig({}), /TEMPOBASE_URL/);
@@ -81,4 +81,61 @@ test("apiGet reports a timeout while reading the body", async () => {
       },
     }) as unknown as Response) as typeof fetch;
   await assert.rejects(apiGet(CONFIG, "hours", {}, { fetch: stalledBody, readToken: () => "t" }), /did not answer within 15 seconds/);
+});
+
+test("apiPost retries once after a connection failure with the same body", async () => {
+  const bodies: string[] = [];
+  let calls = 0;
+  const flaky = (async (_url: URL | string, init?: RequestInit) => {
+    bodies.push(String(init?.body));
+    if (++calls === 1) throw new TypeError("fetch failed");
+    return new Response(JSON.stringify({ id: "op-1" }), { status: 201 });
+  }) as typeof fetch;
+
+  const result = await apiPost(CONFIG, "operations", { idempotencyKey: "k1", a: 1 }, { fetch: flaky, readToken: () => "t" });
+
+  assert.deepEqual(result, { id: "op-1" });
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0], bodies[1]);
+  assert.equal(JSON.parse(bodies[0]!).idempotencyKey, "k1");
+});
+
+test("apiPost gives up after the second connection failure and does not retry HTTP errors", async () => {
+  let calls = 0;
+  const down = (async () => {
+    calls++;
+    throw new TypeError("fetch failed");
+  }) as typeof fetch;
+  await assert.rejects(apiPost(CONFIG, "operations", {}, { fetch: down, readToken: () => "t" }), /fetch failed/);
+  assert.equal(calls, 2);
+
+  const stub = stubFetch(409, { error: "idempotencyKey was already used for a different entry" });
+  await assert.rejects(apiPost(CONFIG, "operations", {}, { fetch: stub.fetch, readToken: () => "t" }), /409/);
+  assert.equal(stub.calls.length, 1);
+  assert.equal(stub.calls[0]!.init.method, "POST");
+  assert.equal(new Headers(stub.calls[0]!.init.headers).get("content-type"), "application/json");
+});
+
+test("apiPost retries a timeout but not a missing Keychain item", async () => {
+  let calls = 0;
+  const slowThenOk = (async () => {
+    if (++calls === 1) throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    return new Response(JSON.stringify({ id: "op-1" }), { status: 200 });
+  }) as typeof fetch;
+  assert.deepEqual(await apiPost(CONFIG, "operations", {}, { fetch: slowThenOk, readToken: () => "t" }), { id: "op-1" });
+
+  let reads = 0;
+  const noToken = () => {
+    reads++;
+    throw new Error("No token found in the macOS Keychain");
+  };
+  await assert.rejects(apiPost(CONFIG, "operations", {}, { fetch: stubFetch(200, {}).fetch, readToken: noToken }), /Keychain/);
+  assert.equal(reads, 1);
+});
+
+test("does not double the period of a server message", async () => {
+  const stub = stubFetch(409, { error: "This project is not active. Activate it before logging time." });
+  await assert.rejects(apiGet(CONFIG, "hours", {}, { fetch: stub.fetch, readToken: () => "t" }), (error: Error) =>
+    error.message.endsWith("logging time.") && !error.message.includes(".."),
+  );
 });

@@ -29,6 +29,21 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
+/** Same-origin path from `?next=`, so a link opened while signed out lands back on it. */
+function returnPath(): string | null {
+  const next = new URLSearchParams(window.location.search).get("next");
+  if (!next?.startsWith("/") || next.includes("\\")) return null;
+  let url: URL;
+  try {
+    url = new URL(next, window.location.origin);
+  } catch {
+    return null; // e.g. "//[" has an invalid host
+  }
+  // A normalized path starting with "//" (e.g. from "/.//host") is protocol-relative to the router.
+  if (url.origin !== window.location.origin || url.pathname.startsWith("//")) return null;
+  return url.pathname + url.search;
+}
+
 export default function LoginPage() {
   const { login, user, isLoading } = useAuth();
   const router = useRouter();
@@ -37,7 +52,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!isLoading && user && profile) {
-      router.replace(`/${profile.defaultLandingPage ?? "tracker"}`);
+      router.replace(returnPath() ?? `/${profile.defaultLandingPage ?? "tracker"}`);
     }
   }, [user, isLoading, profile, router]);
 
@@ -52,7 +67,7 @@ export default function LoginPage() {
     try {
       await login(values);
       const userProfile = await apiFetch<UserProfile>("/users/me");
-      router.push(`/${userProfile.defaultLandingPage ?? "tracker"}`);
+      router.push(returnPath() ?? `/${userProfile.defaultLandingPage ?? "tracker"}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setServerError("Invalid email or password.");

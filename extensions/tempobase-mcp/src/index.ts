@@ -1,12 +1,15 @@
 #!/usr/bin/env node
+import { execFile } from "node:child_process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { apiGet, loadConfig } from "./client.ts";
+import { apiGet, apiPost, loadConfig } from "./client.ts";
+import { buildEntryPayload, confirmUrlFor, idempotencyKeyFor, nextStepFor, type OperationStatus } from "./entries.ts";
 import { formatLocal, PRESETS, resolvePeriod } from "./period.ts";
 
 const config = loadConfig();
-const server = new McpServer({ name: "tempobase", version: "0.1.0" });
+const openBrowser = process.env.TEMPOBASE_OPEN_BROWSER !== "0";
+const server = new McpServer({ name: "tempobase", version: "0.2.0" });
 
 const period = {
   preset: z.enum(PRESETS).optional().describe(`Relative period in ${config.timeZone}. Weeks start on Monday.`),
@@ -97,6 +100,73 @@ server.registerTool(
       }));
       return { timeZone: config.timeZone, ...result, entries };
     }),
+);
+
+interface Operation {
+  id: string;
+  status: OperationStatus;
+  entryId: string | null;
+  entryDeleted: boolean;
+  confirmUrl: string;
+  entry: { startTime: string; endTime: string };
+}
+
+/** Local times for the agent, and a confirm link on the configured host only. */
+function describeOperation(op: Operation) {
+  return {
+    timeZone: config.timeZone,
+    ...op,
+    confirmUrl: confirmUrlFor(config.baseUrl, op.id),
+    entry: { ...op.entry, startLocal: formatLocal(op.entry.startTime, config.timeZone), endLocal: formatLocal(op.entry.endTime, config.timeZone) },
+    nextStep: nextStepFor(op),
+  };
+}
+
+server.registerTool(
+  "prepare_time_entry",
+  {
+    title: "Prepare a time entry",
+    description:
+      "Prepare a new manual time entry for the user to confirm in TempoBase. Nothing is saved until the user selects Confirm on the preview page, which this tool opens in the browser. " +
+      `Times are wall-clock HH:mm in ${config.timeZone}. Ask the user for the date, start time and end time when any is missing; never derive the start from a duration or invent times. ` +
+      "Resolve project and task ids with search_projects; when more than one matches, show the options and ask. Description text is not a registered task. " +
+      "billable defaults to true, and the preview shows it. Calling again with the same entry returns the same operation instead of a duplicate, and re-opens it when it was cancelled or expired.",
+    inputSchema: {
+      date: z.string().describe("Day of the start time, YYYY-MM-DD."),
+      startTime: z.string().describe(`Start time, HH:mm (24 h) in ${config.timeZone}.`),
+      endTime: z.string().describe(`End time, HH:mm (24 h) in ${config.timeZone}. Must be after startTime.`),
+      endDate: z.string().optional().describe("Day of the end time, YYYY-MM-DD, only when the entry crosses midnight. Defaults to date."),
+      description: z.string().max(1000).optional().describe("Free-text description of the work."),
+      projectId: z.string().uuid().optional().describe("Project id from search_projects."),
+      taskId: z.string().uuid().optional().describe("Registered task id from search_projects. Requires its projectId."),
+      billable: z.boolean().optional().describe("Billable status. Defaults to true, like new entries in the app."),
+      idempotencyKey: z
+        .string()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("Omit normally: it is derived from the entry. Pass a new value only to prepare the same entry twice on purpose, or to create again an entry that was confirmed and later deleted."),
+    },
+  },
+  (args) =>
+    run(async () => {
+      const payload = buildEntryPayload(args, config.timeZone);
+      const idempotencyKey = args.idempotencyKey ?? idempotencyKeyFor(payload);
+      const op = describeOperation((await apiPost(config, "operations", { idempotencyKey, ...payload })) as Operation);
+      if (op.status === "pending" && openBrowser) execFile("/usr/bin/open", [op.confirmUrl], () => undefined);
+      return op;
+    }),
+);
+
+server.registerTool(
+  "get_operation_status",
+  {
+    title: "Get operation status",
+    description:
+      "Status of an entry prepared with prepare_time_entry: pending, confirmed (with entryId), cancelled or expired. Use it after the user says they confirmed or cancelled.",
+    inputSchema: { operationId: z.string().uuid().describe("id returned by prepare_time_entry.") },
+  },
+  (args) => run(async () => describeOperation((await apiGet(config, `operations/${args.operationId}`, {})) as Operation)),
 );
 
 await server.connect(new StdioServerTransport());

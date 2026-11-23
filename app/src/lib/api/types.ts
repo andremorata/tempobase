@@ -280,6 +280,34 @@ export interface CreatedIntegrationToken extends IntegrationToken {
 export interface CreateIntegrationTokenRequest {
   name: string;
   expiresInDays: number;
+  /** "read" is always granted; pass "create" to also allow preparing entries. */
+  scopes: Array<"create">;
+}
+
+export type IntegrationOperationStatus = "pending" | "confirmed" | "cancelled" | "expired";
+
+export interface IntegrationOperation {
+  id: string;
+  kind: "create_entry";
+  status: IntegrationOperationStatus;
+  expiresAt: string;
+  createdAt: string;
+  confirmedAt: string | null;
+  cancelledAt: string | null;
+  entryId: string | null;
+  /** True when the operation was confirmed and its entry was deleted afterwards. */
+  entryDeleted: boolean;
+  entry: {
+    startTime: string;
+    endTime: string;
+    durationHours: number;
+    description: string | null;
+    isBillable: boolean;
+    project: { id: string; name: string } | null;
+    task: { id: string; name: string } | null;
+  };
+  /** tokenUsable is false once the token is revoked, expired or without `create`. */
+  integration: { name: string; tokenPrefix: string; tokenUsable: boolean };
 }
 
 // ─── Account & Profile ─────────────────────────────────────────────────────

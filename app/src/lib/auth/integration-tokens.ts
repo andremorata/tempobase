@@ -14,7 +14,7 @@ import { AuthError } from "./helpers";
 
 export const INTEGRATION_TOKEN_PREFIX = "tbp_";
 export const INTEGRATION_TOKEN_MAX_DAYS = 90;
-export const INTEGRATION_SCOPES = ["read"] as const;
+export const INTEGRATION_SCOPES = ["read", "create"] as const;
 export type IntegrationScope = (typeof INTEGRATION_SCOPES)[number];
 
 const TOKEN_PATTERN = /^tbp_[A-Za-z0-9_-]{43}$/;

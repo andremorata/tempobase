@@ -76,6 +76,24 @@ describe("integration token management", () => {
     expect(JSON.stringify(auditMock.createAuditLog.mock.calls)).not.toContain(body.token);
   });
 
+  it("always includes read and adds create only when asked", async () => {
+    await post({ name: "Raycast", scopes: ["create"] });
+    await post({ name: "Raycast", scopes: ["read"] });
+
+    expect(db.create.mock.calls.map((call) => call[0].data.scopes)).toEqual([["read", "create"], ["read"]]);
+    expect((await post({ name: "Raycast", scopes: ["delete"] })).status).toBe(400);
+  });
+
+  it("refuses the create scope to a viewer", async () => {
+    session.user.role = "Viewer";
+    try {
+      expect((await post({ name: "Raycast", scopes: ["create"] })).status).toBe(403);
+      expect((await post({ name: "Raycast" })).status).toBe(201);
+    } finally {
+      session.user.role = "Member";
+    }
+  });
+
   it("defaults to 30 days and refuses more than 90", async () => {
     await post({ name: "Raycast" });
     expect(db.create.mock.calls[0]![0].data.expiresAt).toEqual(new Date("2026-12-20T12:00:00.000Z"));

@@ -35,23 +35,22 @@ export function readKeychainToken(service: string): string {
 
 const TIMEOUT_MS = 15_000;
 
-export async function apiGet(
-  config: Config,
-  path: string,
-  params: Record<string, string | number | boolean | undefined>,
-  deps: { fetch: typeof fetch; readToken: (service: string) => string } = { fetch, readToken: readKeychainToken },
-): Promise<unknown> {
-  const url = new URL(`/api/integrations/v1/${path}`, config.baseUrl);
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
-  }
+type Deps = { fetch: typeof fetch; readToken: (service: string) => string };
+const defaultDeps: Deps = { fetch, readToken: readKeychainToken };
 
-  const isTimeout = (error: unknown) => error instanceof DOMException && error.name === "TimeoutError";
+const isTimeout = (error: unknown) => error instanceof DOMException && error.name === "TimeoutError";
+
+async function send(config: Config, url: URL, init: RequestInit, deps: Deps): Promise<unknown> {
   let res: Response;
   let body: { error?: string } | null;
   try {
     res = await deps.fetch(url, {
-      headers: { authorization: `Bearer ${deps.readToken(config.keychainService)}`, accept: "application/json" },
+      ...init,
+      headers: {
+        ...(init.body ? { "content-type": "application/json" } : {}),
+        authorization: `Bearer ${deps.readToken(config.keychainService)}`,
+        accept: "application/json",
+      },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     // The timeout also covers the body; only a non-JSON body becomes null.
@@ -61,7 +60,7 @@ export async function apiGet(
     });
   } catch (error) {
     if (isTimeout(error)) {
-      throw new Error(`TempoBase at ${config.baseUrl.origin} did not answer within ${TIMEOUT_MS / 1000} seconds.`);
+      throw new NoAnswerError(`TempoBase at ${config.baseUrl.origin} did not answer within ${TIMEOUT_MS / 1000} seconds.`);
     }
     throw error;
   }
@@ -74,7 +73,39 @@ export async function apiGet(
       res.status === 401
         ? " The token is invalid, expired or revoked: create a new one in TempoBase Settings > Integrations."
         : "";
-    throw new Error(`TempoBase returned ${res.status}: ${body?.error ?? res.statusText}.${hint}`);
+    throw new Error(`TempoBase returned ${res.status}: ${(body?.error ?? res.statusText).replace(/\.$/, "")}.${hint}`);
   }
   return body;
+}
+
+class NoAnswerError extends Error {}
+
+const apiUrl = (config: Config, path: string) => new URL(`/api/integrations/v1/${path}`, config.baseUrl);
+
+export async function apiGet(
+  config: Config,
+  path: string,
+  params: Record<string, string | number | boolean | undefined>,
+  deps: Deps = defaultDeps,
+): Promise<unknown> {
+  const url = apiUrl(config, path);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
+  }
+  return send(config, url, {}, deps);
+}
+
+/**
+ * POST with one retry after a connection failure or timeout. Callers send an idempotency key,
+ * so the retry cannot write twice. Answers from the server are never retried.
+ */
+export async function apiPost(config: Config, path: string, body: object, deps: Deps = defaultDeps): Promise<unknown> {
+  const init = { method: "POST", body: JSON.stringify(body) };
+  try {
+    return await send(config, apiUrl(config, path), init, deps);
+  } catch (error) {
+    // fetch rejects with a TypeError when the connection fails.
+    if (!(error instanceof TypeError || error instanceof NoAnswerError)) throw error;
+    return send(config, apiUrl(config, path), init, deps);
+  }
 }
