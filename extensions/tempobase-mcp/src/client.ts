@@ -46,20 +46,29 @@ export async function apiGet(
     if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
   }
 
+  const isTimeout = (error: unknown) => error instanceof DOMException && error.name === "TimeoutError";
   let res: Response;
+  let body: { error?: string } | null;
   try {
     res = await deps.fetch(url, {
       headers: { authorization: `Bearer ${deps.readToken(config.keychainService)}`, accept: "application/json" },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
+    // The timeout also covers the body; only a non-JSON body becomes null.
+    body = await res.json().catch((error: unknown) => {
+      if (isTimeout(error)) throw error;
+      return null;
+    });
   } catch (error) {
-    if (error instanceof DOMException && error.name === "TimeoutError") {
+    if (isTimeout(error)) {
       throw new Error(`TempoBase at ${config.baseUrl.origin} did not answer within ${TIMEOUT_MS / 1000} seconds.`);
     }
     throw error;
   }
-  const body = (await res.json().catch(() => null)) as { error?: string } | null;
 
+  if (res.ok && body === null) {
+    throw new Error(`TempoBase at ${config.baseUrl.origin} did not return JSON. Check TEMPOBASE_URL.`);
+  }
   if (!res.ok) {
     const hint =
       res.status === 401

@@ -65,3 +65,20 @@ test("apiGet reports a timeout clearly", async () => {
   }) as typeof fetch;
   await assert.rejects(apiGet(CONFIG, "hours", {}, { fetch: timeoutFetch, readToken: () => "t" }), /did not answer within 15 seconds/);
 });
+
+test("apiGet fails clearly on a 200 that is not JSON", async () => {
+  const htmlFetch = (async () => new Response("<html></html>", { status: 200 })) as typeof fetch;
+  await assert.rejects(apiGet(CONFIG, "hours", {}, { fetch: htmlFetch, readToken: () => "t" }), /did not return JSON/);
+});
+
+test("apiGet reports a timeout while reading the body", async () => {
+  const stalledBody = (async () =>
+    ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+      },
+    }) as unknown as Response) as typeof fetch;
+  await assert.rejects(apiGet(CONFIG, "hours", {}, { fetch: stalledBody, readToken: () => "t" }), /did not answer within 15 seconds/);
+});
