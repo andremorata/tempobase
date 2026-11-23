@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IntegrationToken } from "@/lib/api/types";
 
 const hooks = vi.hoisted(() => ({
+  role: "Member",
   list: { data: [] as IntegrationToken[] | undefined, isLoading: false, isError: false, refetch: vi.fn() },
   create: vi.fn(),
   revoke: vi.fn(),
@@ -11,7 +12,7 @@ const hooks = vi.hoisted(() => ({
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@/lib/api/hooks/account", () => ({
-  useCurrentUserProfile: () => ({ data: { dateFormat: "ymd" } }),
+  useCurrentUserProfile: () => ({ data: { dateFormat: "ymd", role: hooks.role } }),
 }));
 vi.mock("@/lib/api/hooks/integration-tokens", () => ({
   useIntegrationTokens: () => hooks.list,
@@ -39,8 +40,33 @@ function token(overrides: Partial<IntegrationToken> = {}): IntegrationToken {
 describe("IntegrationTokensCard", () => {
   beforeEach(() => {
     hooks.list = { data: [], isLoading: false, isError: false, refetch: vi.fn() };
+    hooks.role = "Member";
     hooks.create.mockReset();
     hooks.revoke.mockReset();
+  });
+
+  it("adds the create scope only when switched on and shows scopes as badges", async () => {
+    const user = userEvent.setup();
+    hooks.create.mockResolvedValue({ ...token({ scopes: ["read", "create"] }), token: TOKEN });
+    hooks.list.data = [token({ scopes: ["read", "create"] })];
+
+    render(<IntegrationTokensCard />);
+    const scopeSwitch = screen.getByRole("switch", { name: /allow creating entries/i });
+    expect(scopeSwitch).not.toBeChecked();
+    expect(screen.getByText(/write access\. the token can propose entries/i)).toBeInTheDocument();
+
+    await user.click(scopeSwitch);
+    await user.click(screen.getByRole("button", { name: /create token/i }));
+
+    expect(hooks.create).toHaveBeenCalledWith({ name: "Raycast", expiresInDays: 30, scopes: ["create"] });
+    expect(screen.getByText("create", { selector: "[data-slot=badge]" })).toBeInTheDocument();
+    expect(screen.getByText("read", { selector: "[data-slot=badge]" })).toBeInTheDocument();
+  });
+
+  it("hides the create scope from viewers", () => {
+    hooks.role = "Viewer";
+    render(<IntegrationTokensCard />);
+    expect(screen.queryByRole("switch", { name: /allow creating entries/i })).not.toBeInTheDocument();
   });
 
   it("creates a read token, shows it once and copies the full value", async () => {
@@ -51,9 +77,9 @@ describe("IntegrationTokensCard", () => {
     render(<IntegrationTokensCard />);
     expect(screen.getByText(/no tokens yet\. create one above to connect raycast/i)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /create read token/i }));
+    await user.click(screen.getByRole("button", { name: /create token/i }));
 
-    expect(hooks.create).toHaveBeenCalledWith({ name: "Raycast", expiresInDays: 30 });
+    expect(hooks.create).toHaveBeenCalledWith({ name: "Raycast", expiresInDays: 30, scopes: [] });
     expect(screen.getByLabelText(/new integration token/i)).toHaveTextContent(TOKEN);
     expect(screen.getByText(/shown only once/i)).toBeInTheDocument();
 

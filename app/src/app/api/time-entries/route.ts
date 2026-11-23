@@ -11,7 +11,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { withTenant } from "@/lib/db/extensions";
 import { requireAuth, requireTracker, getCurrentTenantId, getCurrentUser, authErrorResponse } from "@/lib/auth/helpers";
-import { getMemberAccess, applyAccessFilter, isProjectAccessible, isProjectOpenForEntries, isTaskAccessible, PROJECT_NOT_ACTIVE_ERROR, refsBelongToAccount } from "@/lib/auth/access";
+import { getMemberAccess, applyAccessFilter } from "@/lib/auth/access";
+import { checkManualEntry, createManualEntry, ManualEntrySchema } from "@/lib/time-entries/manual-entry";
 import { createAuditLog } from "@/lib/audit/logger";
 import { mapTimeEntry } from "./mappers";
 import { summarizeTimeEntryAudit, toTimeEntryAuditSnapshot } from "./audit";
@@ -101,16 +102,6 @@ export async function GET(request: NextRequest) {
 
 // ─── Create Manual Time Entry ─────────────────────────────────────────────────
 
-const CreateTimeEntrySchema = z.object({
-  projectId: z.string().uuid().nullable().optional(),
-  taskId: z.string().uuid().nullable().optional(),
-  description: z.string().max(1000).optional(),
-  startTime: z.string().datetime(),
-  endTime: z.string().datetime(),
-  isBillable: z.boolean().default(false),
-  tagIds: z.array(z.string().uuid()).optional(),
-});
-
 export async function POST(request: NextRequest) {
   try {
     await requireTracker();
@@ -119,94 +110,14 @@ export async function POST(request: NextRequest) {
     const userId = user.id;
     const access = await getMemberAccess(userId, accountId, user.role);
 
-    const body = await request.json();
-    const validated = CreateTimeEntrySchema.parse(body);
+    const validated = ManualEntrySchema.parse(await request.json());
 
-    // Enforce access restrictions on the selected project/task
-    if (!isProjectAccessible(access, validated.projectId)) {
-      return NextResponse.json({ error: "Project not found" }, { status: 404 });
-    }
-    if (!isTaskAccessible(access, validated.taskId)) {
-      return NextResponse.json({ error: "Task not found" }, { status: 404 });
-    }
-    if (!(await refsBelongToAccount(accountId, {
-      projectIds: [validated.projectId],
-      taskIds: [validated.taskId],
-      tagIds: validated.tagIds,
-    }))) {
-      return NextResponse.json({ error: "Project, task or tag not found" }, { status: 404 });
-    }
-    if (!(await isProjectOpenForEntries(accountId, validated.projectId))) {
-      return NextResponse.json({ error: PROJECT_NOT_ACTIVE_ERROR }, { status: 409 });
+    const violation = await checkManualEntry(accountId, access, validated);
+    if (violation) {
+      return NextResponse.json({ error: violation.error }, { status: violation.status });
     }
 
-    const startTime = new Date(validated.startTime);
-    const endTime = new Date(validated.endTime);
-
-    // Validation
-    if (startTime >= endTime) {
-      return NextResponse.json(
-        { error: "End time must be after start time" },
-        { status: 400 }
-      );
-    }
-
-    const durationMs = endTime.getTime() - startTime.getTime();
-    const durationHours = durationMs / (1000 * 60 * 60);
-
-    if (durationHours > 24) {
-      return NextResponse.json(
-        { error: "Time entry cannot exceed 24 hours" },
-        { status: 400 }
-      );
-    }
-
-    const entryDate = new Date(startTime);
-    entryDate.setHours(0, 0, 0, 0);
-
-    // Create time entry in transaction
-    const entry = await prisma.$transaction(async (tx) => {
-      const newEntry = await tx.timeEntry.create({
-        data: {
-          accountId,
-          userId,
-          projectId: validated.projectId ?? null,
-          taskId: validated.taskId ?? null,
-          description: validated.description?.trim() || null,
-          entryDate,
-          startTime,
-          endTime,
-          duration: durationMs,
-          durationDecimal: Number(durationHours.toFixed(4)),
-          isBillable: validated.isBillable,
-          isRunning: false,
-        },
-      });
-
-      // Associate tags if provided
-      if (validated.tagIds && validated.tagIds.length > 0) {
-        await tx.timeEntryTag.createMany({
-          data: validated.tagIds.map((tagId) => ({
-            timeEntryId: newEntry.id,
-            tagId,
-          })),
-        });
-      }
-
-      // Fetch the entry with tags to return properly mapped response
-      const entryWithTags = await tx.timeEntry.findUniqueOrThrow({
-        where: { id: newEntry.id },
-        include: {
-          tags: {
-            include: {
-              tag: true,
-            },
-          },
-        },
-      });
-
-      return entryWithTags;
-    });
+    const entry = await prisma.$transaction((tx) => createManualEntry(tx, { accountId, userId }, validated));
 
     // Create audit log
     await createAuditLog({

@@ -35,7 +35,7 @@ const toUtc = (date: string) => new Date(`${date}T00:00:00.000Z`);
 const fromUtc = (date: Date) => date.toISOString().slice(0, 10);
 const addDays = (date: string, days: number) => fromUtc(new Date(toUtc(date).getTime() + days * 86_400_000));
 
-function isValidDate(value: string): boolean {
+export function isValidDate(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && fromUtc(toUtc(value)) === value;
 }
 

@@ -29,6 +29,14 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
+/** Same-origin path from `?next=`, so a link opened while signed out lands back on it. */
+function returnPath(): string | null {
+  const next = new URLSearchParams(window.location.search).get("next");
+  if (!next?.startsWith("/")) return null;
+  const url = new URL(next, window.location.origin);
+  return url.origin === window.location.origin ? url.pathname + url.search : null;
+}
+
 export default function LoginPage() {
   const { login, user, isLoading } = useAuth();
   const router = useRouter();
@@ -37,7 +45,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!isLoading && user && profile) {
-      router.replace(`/${profile.defaultLandingPage ?? "tracker"}`);
+      router.replace(returnPath() ?? `/${profile.defaultLandingPage ?? "tracker"}`);
     }
   }, [user, isLoading, profile, router]);
 
@@ -52,7 +60,7 @@ export default function LoginPage() {
     try {
       await login(values);
       const userProfile = await apiFetch<UserProfile>("/users/me");
-      router.push(`/${userProfile.defaultLandingPage ?? "tracker"}`);
+      router.push(returnPath() ?? `/${userProfile.defaultLandingPage ?? "tracker"}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setServerError("Invalid email or password.");

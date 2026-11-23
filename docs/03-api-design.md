@@ -43,16 +43,21 @@
 
 ### Integration tokens (local MCP)
 
-Personal read tokens let the local TempoBase MCP (`extensions/tempobase-mcp`) call the API without Auth.js cookies.
+Personal tokens let the local TempoBase MCP (`extensions/tempobase-mcp`) call the API without Auth.js cookies. Scopes: `read` (always) and `create` (opt-in, prepares entries that the user confirms in the app).
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | GET | `/api/account/integration-tokens` | Session | List the caller's non-revoked tokens (no hash, no token) |
-| POST | `/api/account/integration-tokens` | Session | Issue a `read` token: `{ name, expiresInDays }` (1 to 90, default 30). Returns the plain token once. Audited. |
+| POST | `/api/account/integration-tokens` | Session | Issue a token: `{ name, expiresInDays, scopes? }` (1 to 90 days, default 30; `scopes: ["create"]` adds `create`, refused with 403 for Viewer). `read` is always granted. Returns the plain token once. Audited. |
 | DELETE | `/api/account/integration-tokens/[id]` | Session | Revoke one of the caller's tokens. Audited. |
 | GET | `/api/integrations/v1/hours` | Bearer | Total and billable hours: `from`, `to` (YYYY-MM-DD, required), `projectId`, `taskId`, `description`, `roundUp` |
 | GET | `/api/integrations/v1/projects` | Bearer | Accessible projects and their accessible registered tasks: `q`, `limit` (default 50, max 100); returns `hasMore` |
 | GET | `/api/integrations/v1/time-entries` | Bearer | The caller's own entries, newest first (ties broken by id): `from`, `to`, `projectId`, `taskId`, `description`, `page`, `pageSize` (max 100); returns `hasMore` |
+| POST | `/api/integrations/v1/operations` | Bearer `create` | Prepare a manual entry: `{ idempotencyKey, startTime, endTime, description?, projectId?, taskId?, isBillable }` (ISO UTC instants). Writes no entry. Returns the operation (201, or 200 for a repeated key, re-opening a cancelled or expired one) with `confirmUrl` |
+| GET | `/api/integrations/v1/operations/[id]` | Bearer `create` | Status of the caller's own operation and `entryId` once confirmed |
+| GET | `/api/account/integration-operations/[id]` | Session | Preview of the caller's own operation |
+| POST | `/api/account/integration-operations/[id]/confirm` | Session | Create the entry. Audited |
+| POST | `/api/account/integration-operations/[id]/cancel` | Session | Discard a pending operation. Audited |
 
 - Tokens look like `tbp_<43 base64url chars>`. Only the SHA-256 hex hash is stored.
 - `authenticateIntegration` in `app/src/lib/auth/integration-tokens.ts` runs on every call. It rejects unknown, expired or revoked tokens, inactive or removed users and deleted accounts with 401, and a missing scope with 403. It then re-reads project/task access with `getMemberAccess`.
@@ -60,6 +65,18 @@ Personal read tokens let the local TempoBase MCP (`extensions/tempobase-mcp`) ca
 - `from` and `to` must be real calendar dates (`YYYY-MM-DD`); anything else returns 400.
 - `hours` uses the Summary report aggregation (`app/src/lib/reports/summary.ts`), so it matches `/api/reports/summary?userId=<owner>` for the same period, filters and `roundUp`.
 - Integration responses never contain amounts or rates.
+
+### Integration operations (create with confirmation)
+
+The `create` scope never writes an entry by itself. The MCP prepares an operation, and the same user confirms it on `/integrations/operations/[id]` while signed in.
+
+- Prepare applies the rules of `POST /api/time-entries` (`app/src/lib/time-entries/manual-entry.ts`): refs in the account and access, active project, end after start, at most 24 hours. A `taskId` also needs its own `projectId`. Viewer gets 403.
+- The same token and `idempotencyKey` return the existing operation. A cancelled or expired one is re-opened as `pending` with a fresh `expiresAt`, after the entry rules are checked again; the conditional update never touches a confirmed operation. The same key with a different entry returns 409. The MCP derives the key from the entry, so a retry after a connection failure cannot create a second entry.
+- An operation expires 15 minutes after it is prepared. `expired` is computed from `expiresAt`; the row stays `pending`.
+- Operation views carry `status` (`pending`, `confirmed`, `cancelled`, `expired`), the entry preview with project and task names, the token name and prefix, and `entryId`. `confirmUrl` never contains a credential.
+- Only the operation's user sees it: another user of the same account (also Owner/Admin) or another account gets 404.
+- Confirm re-checks the token (not revoked or expired, still has `create`: 403 otherwise), the role, project/task access and the entry rules. It flips `pending -> confirmed` and inserts the entry in one transaction, so a double click or concurrent confirms create one entry; a repeated confirm returns 200 with the same `entryId`. Cancelled or expired operations return 409.
+- The entry audit row has the confirming user as actor and `integrationTokenId`, `integrationTokenName` and `operationId` in `changesJson`. Cancel writes an `IntegrationOperation` / `cancel` audit row.
 
 ### Report round-up
 

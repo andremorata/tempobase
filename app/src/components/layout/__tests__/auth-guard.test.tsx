@@ -68,6 +68,20 @@ describe("AuthGuard", () => {
     expect(screen.queryByText("Protected content")).not.toBeInTheDocument();
   });
 
+  it("keeps the requested page so login can return to it", async () => {
+    authState = { user: null, isLoading: false };
+    window.history.replaceState(null, "", "/integrations/operations/abc");
+
+    try {
+      render(<AuthGuard><div /></AuthGuard>);
+      await waitFor(() => {
+        expect(mockReplace).toHaveBeenCalledWith("/login?next=%2Fintegrations%2Foperations%2Fabc");
+      });
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
+  });
+
   it("renders children for authenticated users", () => {
     render(
       <AuthGuard>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertCircle, Check, Copy, Plug, Trash2 } from "lucide-react";
+import { AlertCircle, Check, Copy, Plug, Trash2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { getApiErrorMessage } from "@/lib/api/client";
 import { useCurrentUserProfile } from "@/lib/api/hooks/account";
 import {
@@ -18,7 +19,9 @@ import {
   useRevokeIntegrationToken,
 } from "@/lib/api/hooks/integration-tokens";
 import type { CreatedIntegrationToken, IntegrationToken } from "@/lib/api/types";
+import { hasRole, TRACKER_ROLES } from "@/lib/auth/roles";
 import { formatDateByPreference, formatTime } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 const EXPIRATIONS = [
   { value: "7", label: "7 days" },
@@ -51,6 +54,8 @@ export function IntegrationTokensCard() {
 
   const [name, setName] = useState("Raycast");
   const [expiresInDays, setExpiresInDays] = useState("30");
+  const [allowCreate, setAllowCreate] = useState(false);
+  const canCreateEntries = hasRole(TRACKER_ROLES, profile?.role);
   const [created, setCreated] = useState<CreatedIntegrationToken | null>(null);
   const [revoking, setRevoking] = useState<IntegrationToken | null>(null);
 
@@ -61,7 +66,13 @@ export function IntegrationTokensCard() {
 
   const handleCreate = async () => {
     try {
-      setCreated(await createToken.mutateAsync({ name: name.trim(), expiresInDays: Number(expiresInDays) }));
+      setCreated(
+        await createToken.mutateAsync({
+          name: name.trim(),
+          expiresInDays: Number(expiresInDays),
+          scopes: allowCreate && canCreateEntries ? ["create"] : [],
+        }),
+      );
     } catch (err) {
       toast.error("Could not create token.", { description: getApiErrorMessage(err, "Failed to create token.") });
     }
@@ -88,12 +99,12 @@ export function IntegrationTokensCard() {
           <CardTitle>Integrations</CardTitle>
         </div>
         <CardDescription>
-          Personal read tokens let the local TempoBase MCP (for example in Raycast) read your own hours and entries.
-          Changing your password revokes them.
+          Personal tokens let the local TempoBase MCP (for example in Raycast) read your own hours and entries, and
+          optionally prepare new entries that you confirm here. Changing your password revokes them.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        <div className="grid gap-3 rounded-xl border border-border/70 bg-muted/30 p-4 md:grid-cols-[1fr_160px_auto] md:items-end">
+        <div className="grid gap-3 rounded-xl border border-border/70 bg-muted/30 p-4 md:grid-cols-[1fr_160px] md:items-end">
           <div className="space-y-2">
             <Label htmlFor="integration-token-name">Token name</Label>
             <Input
@@ -123,8 +134,35 @@ export function IntegrationTokensCard() {
               </SelectContent>
             </Select>
           </div>
-          <Button size="lg" onClick={handleCreate} disabled={createToken.isPending || !name.trim()}>
-            {createToken.isPending ? "Creating…" : "Create read token"}
+          {canCreateEntries && (
+            <div className="space-y-3 rounded-xl border border-border/70 bg-muted/30 p-4 md:col-span-2">
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="integration-token-create">Allow creating entries</Label>
+                  <p className="text-sm text-muted-foreground">
+                    The MCP can prepare new time entries. Nothing is saved until you confirm each one in TempoBase.
+                  </p>
+                </div>
+                <Switch
+                  id="integration-token-create"
+                  checked={allowCreate}
+                  onCheckedChange={setAllowCreate}
+                  disabled={createToken.isPending}
+                />
+              </div>
+              <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+                <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
+                Write access. The token can propose entries; you still confirm each one.
+              </p>
+            </div>
+          )}
+          <Button
+            size="lg"
+            onClick={handleCreate}
+            disabled={createToken.isPending || !name.trim()}
+            className="md:col-span-2 md:justify-self-end"
+          >
+            {createToken.isPending ? "Creating…" : "Create token"}
           </Button>
         </div>
 
@@ -201,11 +239,20 @@ export function IntegrationTokensCard() {
                     <div className="flex flex-wrap items-center gap-2">
                       <p className={expired ? "font-medium text-muted-foreground" : "font-medium"}>{token.name}</p>
                       <code className="font-mono text-xs text-muted-foreground">{token.tokenPrefix}…</code>
-                      {token.scopes.map((scope) => (
-                        <Badge key={scope} variant="secondary" className="capitalize">
-                          {scope}
-                        </Badge>
-                      ))}
+                      <span className="inline-flex shrink-0 gap-1">
+                        {token.scopes.map((scope) => (
+                          <Badge
+                            key={scope}
+                            variant={scope === "create" ? "outline" : "secondary"}
+                            className={cn(
+                              "capitalize",
+                              scope === "create" && "border-amber-500/50 bg-amber-500/15 text-amber-800 dark:text-amber-300",
+                            )}
+                          >
+                            {scope}
+                          </Badge>
+                        ))}
+                      </span>
                       {expired && <Badge variant="destructive">Expired</Badge>}
                     </div>
                     <dl className="grid gap-0.5 text-xs text-muted-foreground sm:flex sm:flex-wrap sm:gap-x-4">

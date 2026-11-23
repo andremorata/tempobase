@@ -79,6 +79,23 @@ describe("LoginPage", () => {
     });
   });
 
+  it.each([
+    ["/integrations/operations/abc", "/integrations/operations/abc"],
+    ["//evil.example.com/x", "/dashboard"],
+    ["https://evil.example.com/x", "/dashboard"],
+  ])("returns to next=%s only when it is a same-origin path", async (next, expected) => {
+    window.history.replaceState(null, "", `/login?next=${encodeURIComponent(next)}`);
+    authUser = { id: "user-1", email: "owner@example.com" };
+    profileData = { defaultLandingPage: "dashboard" };
+
+    try {
+      render(<LoginPage />);
+      await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(expected));
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
+  });
+
   it("shows a friendly error for invalid credentials", async () => {
     const user = userEvent.setup();
     mockLogin.mockRejectedValue(new ApiError(401, "Unauthorized"));

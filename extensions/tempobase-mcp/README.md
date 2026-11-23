@@ -1,6 +1,6 @@
 # TempoBase MCP
 
-Local `stdio` MCP server that reads your own TempoBase hours and time entries. It runs on your Mac, reads a personal token from the macOS Keychain, and calls the TempoBase API over HTTPS. It never reads browser cookies and cannot write entries.
+Local `stdio` MCP server that reads your own TempoBase hours and time entries and prepares new entries. It runs on your Mac, reads a personal token from the macOS Keychain, and calls the TempoBase API over HTTPS. It never reads browser cookies. It cannot save an entry on its own: you confirm each one in TempoBase.
 
 ## Tools
 
@@ -9,6 +9,8 @@ Local `stdio` MCP server that reads your own TempoBase hours and time entries. I
 | `get_my_hours` | Total and billable hours for a period, per project. The server computes them with the Summary report logic. Filters: `projectId`, `taskId`, `description`, `roundUp` (off by default). |
 | `search_projects` | Projects and registered tasks you can access, matched by name. `limit` defaults to 50; `hasMore` says whether more matched. Use the ids in the other tools. |
 | `list_my_time_entries` | Your own entries, newest first and paginated: id, date, start/end in UTC (`startTime`, `endTime`) and in your timezone (`startLocal`, `endLocal`, `YYYY-MM-DD HH:mm`), description, project, task, billable, running. |
+| `prepare_time_entry` | Needs the `create` scope. Prepares a manual entry from `date`, `startTime`, `endTime` (`HH:mm` in your timezone), optional `endDate` (entries that cross midnight), `description`, `projectId`, `taskId` (needs its `projectId`) and `billable` (default `true`, like the app). Saves nothing. Returns the operation id, `status`, the preview and `confirmUrl`, and opens that URL in your browser. |
+| `get_operation_status` | Needs the `create` scope. Status of a prepared entry: `pending`, `confirmed` (with `entryId`), `cancelled` or `expired`. |
 
 Periods take a `preset` (`today`, `yesterday`, `this_week`, `last_week`, `this_month`, `last_month`; weeks start on Monday) or `from`/`to` dates (`YYYY-MM-DD`). Presets resolve in `TEMPOBASE_TIMEZONE`, or the Mac's timezone when unset.
 
@@ -16,9 +18,22 @@ The `description` filter matches free text in the entry description. It is not a
 
 Only your own entries are returned, also for Owner and Admin. Amounts and rates are never returned.
 
+## Creating an entry
+
+1. Ask, for example, "Log Friday 14:00 to 15:30 on DVI2026, code review, 'Review PR 7'". The agent resolves the project and task with `search_projects` and asks when several match. It asks for missing times; it never derives a start time from a duration.
+2. `prepare_time_entry` opens the preview in TempoBase. The link carries only the operation id; you must be signed in as the token's owner, or you get "not available".
+3. Check the date, times, description, project, task and billable status, then select **Confirm and save** or **Cancel**. The preview expires after 15 minutes.
+4. Ask the agent for the result. `get_operation_status` returns `confirmed` and the new entry id, or `cancelled` / `expired`.
+
+Calling `prepare_time_entry` again with the same entry returns the same operation, also after a connection failure (the MCP retries once with the same key). It does not create a second entry. A cancelled or expired preview is re-opened for another 15 minutes, and you confirm it again.
+
+On confirm, TempoBase checks again that the token is valid and still has `create`, and that you can still log time on the project and task. Revoking the token blocks pending confirmations.
+
+Set `TEMPOBASE_OPEN_BROWSER=0` to return the link without opening it.
+
 ## 1. Issue a token
 
-In TempoBase, open **Settings > Integrations**, name the token (for example `Raycast`), pick an expiration (at most 90 days) and select **Create read token**. Copy the token: it is shown once.
+In TempoBase, open **Settings > Integrations**, name the token (for example `Raycast`) and pick an expiration (at most 90 days). Turn on **Allow creating entries** to let the MCP prepare entries; leave it off for a read-only token. Select **Create token** and copy it: it is shown once. The token list shows each token's scopes.
 
 Changing your password revokes all your tokens. Revoke a single token from the same screen.
 
@@ -56,6 +71,7 @@ Open Raycast, run **Install Server** (MCP extension) and fill in:
 | Environment | `TEMPOBASE_URL=https://your-tempobase-host` |
 | | `TEMPOBASE_TIMEZONE=America/Sao_Paulo` (optional) |
 | | `TEMPOBASE_KEYCHAIN_SERVICE=tempobase-mcp` (optional) |
+| | `TEMPOBASE_OPEN_BROWSER=0` (optional, do not open the preview) |
 
 The same settings as JSON, for clients that take an `mcpServers` config:
 
@@ -82,4 +98,6 @@ The Reports page shows a Member only their own entries, so the numbers match dir
 ## Errors
 
 - `401`: the token is invalid, expired or revoked. Create a new one and replace the Keychain item.
+- `403` on `prepare_time_entry`: the token has no `create` scope (create a new one with **Allow creating entries**), or your role cannot log time.
 - `404`: the project or task does not exist or is outside your access.
+- `409`: the project is not active, or the `idempotencyKey` was used for a different entry.

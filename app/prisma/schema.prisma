@@ -64,6 +64,7 @@ model Account {
   userTaskAccess       UserTaskAccess[]
   importSessions       ImportSession[]
   integrationTokens    IntegrationToken[]
+  integrationOperations IntegrationOperation[]
 
   @@map("accounts")
 }
@@ -102,6 +103,7 @@ model User {
   taskAccess           UserTaskAccess[]
   importSessions       ImportSession[]
   integrationTokens    IntegrationToken[]
+  integrationOperations IntegrationOperation[]
 
   @@unique([accountId, id])
   // One active account per email across workspaces. Emails are stored lowercase;
@@ -257,6 +259,7 @@ model TimeEntry {
   task                 ProjectTask?   @relation(fields: [taskId], references: [id])
   importSession        ImportSession? @relation(fields: [importSessionId], references: [id], onDelete: SetNull)
   tags                 TimeEntryTag[]
+  integrationOperations IntegrationOperation[]
 
   @@index([accountId, userId, entryDate])
   @@index([accountId, isRunning])
@@ -462,7 +465,39 @@ model IntegrationToken {
   account              Account   @relation(fields: [accountId], references: [id])
   // Composite key keeps the token owner inside the token's account at the database level.
   user                 User      @relation(fields: [accountId, userId], references: [accountId, id])
+  operations           IntegrationOperation[]
 
   @@index([accountId, userId])
   @@map("integration_tokens")
+}
+
+// A write prepared through an integration token. It takes effect only when the same user
+// confirms it in the app. "expired" is derived from expiresAt; the row stays "pending".
+model IntegrationOperation {
+  id                   String     @id @default(uuid()) @db.Uuid
+  accountId            String     @map("account_id") @db.Uuid
+  userId               String     @map("user_id") @db.Uuid
+  tokenId              String     @map("token_id") @db.Uuid
+  kind                 String     @db.VarChar(30) // create_entry
+  idempotencyKey       String     @map("idempotency_key") @db.VarChar(100)
+  payload              Json
+  status               String     @default("pending") @db.VarChar(20) // pending | confirmed | cancelled
+  expiresAt            DateTime   @map("expires_at") @db.Timestamptz
+  resultEntryId        String?    @map("result_entry_id") @db.Uuid
+  confirmedAt          DateTime?  @map("confirmed_at") @db.Timestamptz
+  cancelledAt          DateTime?  @map("cancelled_at") @db.Timestamptz
+
+  // Audit fields
+  createdAt            DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime?  @map("updated_at") @db.Timestamptz
+
+  // Relations
+  account              Account    @relation(fields: [accountId], references: [id])
+  user                 User       @relation(fields: [accountId, userId], references: [accountId, id])
+  token                IntegrationToken @relation(fields: [tokenId], references: [id])
+  resultEntry          TimeEntry? @relation(fields: [resultEntryId], references: [id], onDelete: SetNull)
+
+  @@unique([tokenId, idempotencyKey])
+  @@index([accountId, userId])
+  @@map("integration_operations")
 }

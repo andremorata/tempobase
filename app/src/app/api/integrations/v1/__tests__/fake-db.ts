@@ -18,7 +18,7 @@ function matches(value: unknown, filter: Filter | undefined): boolean {
   return true;
 }
 
-const SCALAR_KEYS = ["id", "accountId", "userId", "projectId", "taskId", "isDeleted", "isRunning", "isBillable", "entryDate", "description", "name"];
+const SCALAR_KEYS = ["id", "accountId", "userId", "projectId", "taskId", "isDeleted", "isRunning", "isBillable", "entryDate", "description", "name", "status"];
 
 function matchesWhere(row: Record<string, unknown>, where: Where): boolean {
   return SCALAR_KEYS.every((key) => matches(row[key], where[key] as Filter | undefined));
@@ -31,6 +31,7 @@ export const ids = {
   memberA: "aaaaaaaa-1111-4000-8000-000000000002",
   memberA2: "aaaaaaaa-1111-4000-8000-000000000003",
   memberTaskA: "aaaaaaaa-1111-4000-8000-000000000004",
+  viewerA: "aaaaaaaa-1111-4000-8000-000000000005",
   ownerB: "bbbbbbbb-1111-4000-8000-000000000001",
   projectA1: "aaaaaaaa-2222-4000-8000-000000000001",
   projectA2: "aaaaaaaa-2222-4000-8000-000000000002",
@@ -53,6 +54,7 @@ export function createFakeDb(now: Date) {
     { id: ids.memberA, accountId: ids.acctA, role: "Member", isActive: true, isDeleted: false, canViewAmounts: false },
     { id: ids.memberA2, accountId: ids.acctA, role: "Member", isActive: true, isDeleted: false, canViewAmounts: false },
     { id: ids.memberTaskA, accountId: ids.acctA, role: "Member", isActive: true, isDeleted: false, canViewAmounts: false },
+    { id: ids.viewerA, accountId: ids.acctA, role: "Viewer", isActive: true, isDeleted: false, canViewAmounts: false },
     { id: ids.ownerB, accountId: ids.acctB, role: "Owner", isActive: true, isDeleted: false, canViewAmounts: true },
   ];
   const projects = [
@@ -107,6 +109,8 @@ export function createFakeDb(now: Date) {
       id: `token-${tokens.length}`,
       accountId: user.accountId,
       userId,
+      name: "Raycast",
+      tokenPrefix: token.slice(0, 12),
       scopes: ["read"],
       expiresAt: new Date(now.getTime() + 86_400_000),
       revokedAt: null,
@@ -125,7 +129,65 @@ export function createFakeDb(now: Date) {
   const filterTasks = (projectId: string, where: Where = {}) =>
     tasks.filter((t) => t.projectId === projectId && matchesWhere(t, where));
 
+  const operations: Array<Record<string, unknown>> = [];
+  const auditLogs: Array<Record<string, unknown>> = [];
+  const tokenFor = (op: Record<string, unknown>) => tokens.find((t) => t.id === op.tokenId)!;
+  const withToken = (op: Record<string, unknown> | undefined) => (op ? { ...op, token: tokenFor(op) } : null);
+  const opMatches = (op: Record<string, unknown>, where: Where): boolean => {
+    const { expiresAt, token, OR, ...scalars } = where as Where & {
+      expiresAt?: { gt?: Date; lte?: Date };
+      token?: { revokedAt: null; expiresAt: { gt: Date } };
+      OR?: Where[];
+    };
+    if (!Object.entries(scalars).every(([key, value]) => op[key] === value)) return false;
+    if (expiresAt?.gt && !((op.expiresAt as Date) > expiresAt.gt)) return false;
+    if (expiresAt?.lte && !((op.expiresAt as Date) <= expiresAt.lte)) return false;
+    if (OR && !OR.some((branch) => opMatches(op, branch))) return false;
+    if (token) {
+      const row = tokenFor(op);
+      if (row.revokedAt !== null || !((row.expiresAt as Date) > token.expiresAt.gt)) return false;
+    }
+    return true;
+  };
+
+  let txChain: Promise<unknown> = Promise.resolve();
   const prisma = {
+    // Serialized, like Postgres row locks on the operation being confirmed.
+    $transaction: <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => {
+      const run = txChain.then(() => fn(prisma));
+      txChain = run.catch(() => undefined);
+      return run;
+    },
+    auditLog: {
+      create: async ({ data }: { data: Record<string, unknown> }) => (auditLogs.push(data), data),
+    },
+    integrationOperation: {
+      findUnique: async ({ where }: { where: { tokenId_idempotencyKey: { tokenId: string; idempotencyKey: string } } }) =>
+        withToken(operations.find((o) => o.tokenId === where.tokenId_idempotencyKey.tokenId && o.idempotencyKey === where.tokenId_idempotencyKey.idempotencyKey)),
+      findFirst: async ({ where }: { where: Where }) => withToken(operations.find((o) => opMatches(o, where))),
+      findUniqueOrThrow: async ({ where }: { where: { id: string } }) => withToken(operations.find((o) => o.id === where.id))!,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const row = {
+          id: `00000000-0000-4000-8000-${String(operations.length + 1).padStart(12, "0")}`,
+          status: "pending",
+          resultEntryId: null,
+          confirmedAt: null,
+          cancelledAt: null,
+          createdAt: new Date(),
+          updatedAt: null,
+          ...data,
+        };
+        operations.push(row);
+        return withToken(row);
+      },
+      updateMany: async ({ where, data }: { where: Where; data: Record<string, unknown> }) => {
+        const rows = operations.filter((o) => opMatches(o, where));
+        rows.forEach((o) => Object.assign(o, data));
+        return { count: rows.length };
+      },
+      update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) =>
+        withToken(Object.assign(operations.find((o) => o.id === where.id)!, data)),
+    },
     integrationToken: {
       findUnique: async ({ where }: { where: { tokenHash: string } }) => {
         const row = tokens.find((t) => t.tokenHash === where.tokenHash);
@@ -147,6 +209,7 @@ export function createFakeDb(now: Date) {
         taskAccess.filter((a) => a.userId === where.userId && a.accountId === where.accountId),
     },
     project: {
+      findFirst: async ({ where }: { where: Where }) => projects.find((p) => matchesWhere(p, where)) ?? null,
       count: async ({ where }: { where: Where }) => projects.filter((p) => matchesWhere(p, where)).length,
       findMany: async ({
         where,
@@ -171,6 +234,12 @@ export function createFakeDb(now: Date) {
       findFirst: async ({ where }: { where: Where }) => tasks.find((t) => matchesWhere(t, where)) ?? null,
     },
     timeEntry: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { ...entry(data.userId as string, data.accountId as string, "2000-01-01", 0), ...data };
+        timeEntries.push(row as (typeof timeEntries)[number]);
+        return row;
+      },
+      findUniqueOrThrow: async ({ where }: { where: { id: string } }) => ({ ...timeEntries.find((e) => e.id === where.id)!, tags: [] }),
       findMany: async ({
         where,
         skip = 0,
@@ -198,5 +267,5 @@ export function createFakeDb(now: Date) {
     },
   };
 
-  return { prisma, users, accounts, addToken };
+  return { prisma, users, accounts, projects, tokens, operations, timeEntries, auditLogs, projectAccess, addToken };
 }

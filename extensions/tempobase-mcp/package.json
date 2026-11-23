@@ -1,8 +1,8 @@
 {
   "name": "@tempobase/mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Local stdio MCP server that reads your own TempoBase hours and time entries.",
+  "description": "Local stdio MCP server that reads your own TempoBase hours and entries and prepares new entries for confirmation.",
   "type": "module",
   "bin": {
     "tempobase-mcp": "dist/index.js"
