@@ -90,17 +90,17 @@ erDiagram
 ### Integration Tokens
 
 - `integration_tokens` holds personal tokens for the local MCP. `token_hash` is the SHA-256 hex of the token and is unique; the plain token is never stored. `token_prefix` keeps the first 12 characters for display.
-- `scopes` is a text array: `read` is always issued, `create` on request.
+- `scopes` is a text array: `read` is always issued, `create` and `correct` on request.
 - `expires_at` is required (at most 90 days from issue). Revocation sets `revoked_at`; rows are not deleted. `last_used_at` is updated on each authenticated call.
 - The user relation uses `(account_id, user_id)` against `domain_users (account_id, id)`, so a token owner always belongs to the token's account.
 
 ### Integration Operations
 
-- `integration_operations` holds writes an integration token prepared and the same user confirms in the app. `kind` is `create_entry` today.
-- `payload` (jsonb) is the normalized entry: `startTime`, `endTime` (ISO UTC), `description`, `projectId`, `taskId`, `isBillable`.
+- `integration_operations` holds writes an integration token prepared and the same user confirms in the app. `kind` is `create_entry` or `correct_entry` (varchar, so new kinds need no migration).
+- `payload` (jsonb) for `create_entry` is the normalized entry: `startTime`, `endTime` (ISO UTC), `description`, `projectId`, `taskId`, `isBillable`. For `correct_entry` it is `{ entryId, changes, before }`: `changes` holds only the fields to change, and `before` the same six fields as the entry was when the preview was made. Confirm writes only while the entry still matches `before`.
 - `status` is `pending`, `confirmed` or `cancelled`. Expiry is derived from `expires_at` (15 minutes after prepare); no job rewrites the row.
 - `(token_id, idempotency_key)` is unique, so a retried prepare returns the existing row. Preparing a cancelled or expired row again resets it to `pending` with a new `expires_at` and clears `cancelled_at`.
-- `result_entry_id` points to the created `time_entries` row (`ON DELETE SET NULL`). `confirmed_at` and `cancelled_at` record the decision.
+- `result_entry_id` points to the created or corrected `time_entries` row (`ON DELETE SET NULL`). `confirmed_at` and `cancelled_at` record the decision.
 - The user relation uses `(account_id, user_id)` like `integration_tokens`.
 
 ## 7. Migration Strategy

@@ -4,12 +4,21 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { apiGet, apiPost, loadConfig } from "./client.ts";
-import { buildEntryPayload, confirmUrlFor, idempotencyKeyFor, nextStepFor, type OperationStatus } from "./entries.ts";
+import {
+  buildCorrectionChanges,
+  buildEntryPayload,
+  confirmUrlFor,
+  correctionKeyFor,
+  idempotencyKeyFor,
+  nextStepFor,
+  type OperationKind,
+  type OperationStatus,
+} from "./entries.ts";
 import { formatLocal, PRESETS, resolvePeriod } from "./period.ts";
 
 const config = loadConfig();
 const openBrowser = process.env.TEMPOBASE_OPEN_BROWSER !== "0";
-const server = new McpServer({ name: "tempobase", version: "0.2.0" });
+const server = new McpServer({ name: "tempobase", version: "0.3.0" });
 
 const period = {
   preset: z.enum(PRESETS).optional().describe(`Relative period in ${config.timeZone}. Weeks start on Monday.`),
@@ -102,14 +111,27 @@ server.registerTool(
     }),
 );
 
+interface OperationEntry {
+  startTime: string;
+  endTime: string;
+}
+
 interface Operation {
   id: string;
+  kind: OperationKind;
   status: OperationStatus;
   entryId: string | null;
   entryDeleted: boolean;
   confirmUrl: string;
-  entry: { startTime: string; endTime: string };
+  entry: OperationEntry;
+  before: OperationEntry | null;
 }
+
+const withLocal = (entry: OperationEntry) => ({
+  ...entry,
+  startLocal: formatLocal(entry.startTime, config.timeZone),
+  endLocal: formatLocal(entry.endTime, config.timeZone),
+});
 
 /** Local times for the agent, and a confirm link on the configured host only. */
 function describeOperation(op: Operation) {
@@ -117,9 +139,16 @@ function describeOperation(op: Operation) {
     timeZone: config.timeZone,
     ...op,
     confirmUrl: confirmUrlFor(config.baseUrl, op.id),
-    entry: { ...op.entry, startLocal: formatLocal(op.entry.startTime, config.timeZone), endLocal: formatLocal(op.entry.endTime, config.timeZone) },
+    entry: withLocal(op.entry),
+    before: op.before ? withLocal(op.before) : null,
     nextStep: nextStepFor(op),
   };
+}
+
+async function prepareAndOpen(body: object) {
+  const op = describeOperation((await apiPost(config, "operations", body)) as Operation);
+  if (op.status === "pending" && openBrowser) execFile("/usr/bin/open", [op.confirmUrl], () => undefined);
+  return op;
 }
 
 server.registerTool(
@@ -151,10 +180,56 @@ server.registerTool(
   (args) =>
     run(async () => {
       const payload = buildEntryPayload(args, config.timeZone);
-      const idempotencyKey = args.idempotencyKey ?? idempotencyKeyFor(payload);
-      const op = describeOperation((await apiPost(config, "operations", { idempotencyKey, ...payload })) as Operation);
-      if (op.status === "pending" && openBrowser) execFile("/usr/bin/open", [op.confirmUrl], () => undefined);
-      return op;
+      return prepareAndOpen({ idempotencyKey: args.idempotencyKey ?? idempotencyKeyFor(payload), ...payload });
+    }),
+);
+
+server.registerTool(
+  "prepare_time_entry_correction",
+  {
+    title: "Prepare a time entry correction",
+    description:
+      "Prepare a change to one of your own existing time entries for the user to confirm in TempoBase. Nothing changes until the user selects Confirm on the preview page, which this tool opens in the browser; the preview shows the entry now and after the change. " +
+      "First find the entry with list_my_time_entries; when more than one entry matches what the user said, show the candidates (date, times, description, project) and ask which one. Never pick one yourself. " +
+      "Pass only the fields the user asked to change; every other field stays as it is. Never invent values: when the user's request is ambiguous or a value is missing, ask. " +
+      `Times are wall-clock HH:mm in ${config.timeZone}. Running timers, other users' entries, deletion and bulk changes are not supported. ` +
+      "If the entry changes in TempoBase before the user confirms, the correction is not applied over it: TempoBase shows the new values and asks to confirm again. " +
+      "Calling again with the same changes returns the same operation, and re-opens it when it was cancelled or expired.",
+    inputSchema: {
+      entryId: z.string().uuid().describe("id of the entry, from list_my_time_entries."),
+      date: z
+        .string()
+        .optional()
+        .describe("Local day of the entry's start, YYYY-MM-DD (the date in startLocal). Required when startTime or endTime is given; otherwise ignored."),
+      startTime: z.string().optional().describe(`New start time, HH:mm (24 h) in ${config.timeZone}.`),
+      endTime: z.string().optional().describe(`New end time, HH:mm (24 h) in ${config.timeZone}.`),
+      endDate: z.string().optional().describe("Local day of the end time, YYYY-MM-DD, only when the entry crosses midnight. Defaults to date."),
+      description: z.string().max(1000).nullable().optional().describe("New description. null clears it."),
+      projectId: z.string().uuid().nullable().optional().describe("New project id from search_projects. null removes the project."),
+      taskId: z
+        .string()
+        .uuid()
+        .nullable()
+        .optional()
+        .describe("New registered task id from search_projects; it must belong to the entry's project (pass projectId too when moving). null removes the task."),
+      billable: z.boolean().optional().describe("New billable status."),
+      idempotencyKey: z
+        .string()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("Omit normally: it is derived from the entry and the changes. Pass a new value only to apply the same change again after it was confirmed and later undone in TempoBase."),
+    },
+  },
+  (args) =>
+    run(async () => {
+      const changes = buildCorrectionChanges(args, config.timeZone);
+      return prepareAndOpen({
+        kind: "correct_entry",
+        idempotencyKey: args.idempotencyKey ?? correctionKeyFor(args.entryId, changes),
+        entryId: args.entryId,
+        ...changes,
+      });
     }),
 );
 
@@ -163,8 +238,8 @@ server.registerTool(
   {
     title: "Get operation status",
     description:
-      "Status of an entry prepared with prepare_time_entry: pending, confirmed (with entryId), cancelled or expired. Use it after the user says they confirmed or cancelled.",
-    inputSchema: { operationId: z.string().uuid().describe("id returned by prepare_time_entry.") },
+      "Status of an operation prepared with prepare_time_entry or prepare_time_entry_correction: pending, confirmed (with entryId), cancelled or expired. For a correction, before is the entry now and entry is the result. Use it after the user says they confirmed or cancelled.",
+    inputSchema: { operationId: z.string().uuid().describe("id returned by prepare_time_entry or prepare_time_entry_correction.") },
   },
   (args) => run(async () => describeOperation((await apiGet(config, `operations/${args.operationId}`, {})) as Operation)),
 );

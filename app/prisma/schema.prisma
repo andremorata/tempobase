@@ -478,7 +478,7 @@ model IntegrationOperation {
   accountId            String     @map("account_id") @db.Uuid
   userId               String     @map("user_id") @db.Uuid
   tokenId              String     @map("token_id") @db.Uuid
-  kind                 String     @db.VarChar(30) // create_entry
+  kind                 String     @db.VarChar(30) // create_entry | correct_entry
   idempotencyKey       String     @map("idempotency_key") @db.VarChar(100)
   payload              Json
   status               String     @default("pending") @db.VarChar(20) // pending | confirmed | cancelled

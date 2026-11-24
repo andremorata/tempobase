@@ -1,6 +1,6 @@
 # TempoBase MCP
 
-Local `stdio` MCP server that reads your own TempoBase hours and time entries and prepares new entries. It runs on your Mac, reads a personal token from the macOS Keychain, and calls the TempoBase API over HTTPS. It never reads browser cookies. It cannot save an entry on its own: you confirm each one in TempoBase.
+Local `stdio` MCP server that reads your own TempoBase hours and time entries, prepares new entries and prepares corrections. It runs on your Mac, reads a personal token from the macOS Keychain, and calls the TempoBase API over HTTPS. It never reads browser cookies. It cannot save or change an entry on its own: you confirm each one in TempoBase.
 
 ## Tools
 
@@ -10,7 +10,8 @@ Local `stdio` MCP server that reads your own TempoBase hours and time entries an
 | `search_projects` | Projects and registered tasks you can access, matched by name. `limit` defaults to 50; `hasMore` says whether more matched. Use the ids in the other tools. |
 | `list_my_time_entries` | Your own entries, newest first and paginated: id, date, start/end in UTC (`startTime`, `endTime`) and in your timezone (`startLocal`, `endLocal`, `YYYY-MM-DD HH:mm`), description, project, task, billable, running. |
 | `prepare_time_entry` | Needs the `create` scope. Prepares a manual entry from `date`, `startTime`, `endTime` (`HH:mm` in your timezone), optional `endDate` (entries that cross midnight), `description`, `projectId`, `taskId` (needs its `projectId`) and `billable` (default `true`, like the app). Saves nothing. Returns the operation id, `status`, the preview and `confirmUrl`, and opens that URL in your browser. |
-| `get_operation_status` | Needs the `create` scope. Status of a prepared entry: `pending`, `confirmed` (with `entryId`), `cancelled` or `expired`. |
+| `prepare_time_entry_correction` | Needs the `correct` scope. Prepares a change to one of your entries: `entryId` (from `list_my_time_entries`) and only the fields to change: `startTime`/`endTime` (`HH:mm`, with `date`, the entry's local start day, and `endDate` when it crosses midnight), `description`, `projectId`, `taskId` and `billable`. `null` clears description, project or task. Changes nothing. Returns `before` (the entry now), `entry` (after the change), `changedFields` and `confirmUrl`, and opens that URL. |
+| `get_operation_status` | Needs the scope of the operation (`create` or `correct`). Status of a prepared entry or correction: `pending`, `confirmed` (with `entryId`), `cancelled` or `expired`. |
 
 Periods take a `preset` (`today`, `yesterday`, `this_week`, `last_week`, `this_month`, `last_month`; weeks start on Monday) or `from`/`to` dates (`YYYY-MM-DD`). Presets resolve in `TEMPOBASE_TIMEZONE`, or the Mac's timezone when unset.
 
@@ -29,11 +30,21 @@ Calling `prepare_time_entry` again with the same entry returns the same operatio
 
 On confirm, TempoBase checks again that the token is valid and still has `create`, and that you can still log time on the project and task. Revoking the token blocks pending confirmations.
 
+## Correcting an entry
+
+1. Ask, for example, "Show my entries from Friday on DVI2026. On the reviews one, change the end to 17:00". The agent lists them with `list_my_time_entries`. When more than one entry matches, it shows them and asks which one.
+2. `prepare_time_entry_correction` opens the preview. It shows the entry now and after the change, and marks the fields that change. Everything else stays as it is.
+3. Select **Confirm correction** or **Cancel**. The preview expires after 15 minutes.
+4. If the entry was edited in TempoBase after the preview, confirming saves nothing. The page shows the entry's current values with your change applied, and you confirm again.
+5. Ask the agent for the result. `get_operation_status` returns `confirmed`, or `cancelled` / `expired`.
+
+Running timers, other users' entries, deletion and bulk changes are out of scope.
+
 Set `TEMPOBASE_OPEN_BROWSER=0` to return the link without opening it.
 
 ## 1. Issue a token
 
-In TempoBase, open **Settings > Integrations**, name the token (for example `Raycast`) and pick an expiration (at most 90 days). Turn on **Allow creating entries** to let the MCP prepare entries; leave it off for a read-only token. Select **Create token** and copy it: it is shown once. The token list shows each token's scopes.
+In TempoBase, open **Settings > Integrations**, name the token (for example `Raycast`) and pick an expiration (at most 90 days). Turn on **Allow creating entries** to let the MCP prepare new entries, and **Allow correcting entries** to let it prepare changes to existing ones; leave both off for a read-only token. Select **Create token** and copy it: it is shown once. The token list shows each token's scopes.
 
 Changing your password revokes all your tokens. Revoke a single token from the same screen.
 
@@ -99,5 +110,7 @@ The Reports page shows a Member only their own entries, so the numbers match dir
 
 - `401`: the token is invalid, expired or revoked. Create a new one and replace the Keychain item.
 - `403` on `prepare_time_entry`: the token has no `create` scope (create a new one with **Allow creating entries**), or your role cannot log time.
+- `403` on `prepare_time_entry_correction`: the token has no `correct` scope (create a new one with **Allow correcting entries**).
+- `400` on a correction: nothing would change, the times are invalid, or the task does not belong to the entry's project (pass `taskId`, or `null`).
 - `404`: the project or task does not exist or is outside your access.
-- `409`: the project is not active, or the `idempotencyKey` was used for a different entry.
+- `409`: the project is not active, the entry is a running timer, or the `idempotencyKey` was used for a different entry.

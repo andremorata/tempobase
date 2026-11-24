@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authErrorResponse, getCurrentUser } from "@/lib/auth/helpers";
 import { createAuditLog } from "@/lib/audit/logger";
 import { prisma } from "@/lib/db/prisma";
-import { findOwnOperation, OPERATION_NOT_FOUND, operationStatus, toOperationView } from "@/lib/integrations/operations";
+import { CORRECT_ENTRY, findOwnOperation, OPERATION_NOT_FOUND, operationStatus, toOperationView } from "@/lib/integrations/operations";
 
 export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -36,7 +36,7 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
         action: "cancel",
         entityType: "IntegrationOperation",
         entityId: op.id,
-        summary: `Cancelled time entry prepared by integration "${op.token.name}"`,
+        summary: `Cancelled ${op.kind === CORRECT_ENTRY ? "time entry correction" : "time entry"} prepared by integration "${op.token.name}"`,
         changesJson: { kind: op.kind, integrationTokenId: op.token.id, integrationTokenName: op.token.name, payload: op.payload },
       });
     }

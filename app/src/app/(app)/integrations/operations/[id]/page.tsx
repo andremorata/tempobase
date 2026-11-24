@@ -1,8 +1,8 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Ban, CalendarClock, Check, CheckCircle2, Clock, KeyRound, Plug, TimerOff, TriangleAlert } from "lucide-react";
+import { ArrowRight, Ban, CalendarClock, Check, CheckCircle2, Clock, KeyRound, Plug, RefreshCw, TimerOff, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -14,7 +14,12 @@ import {
   useConfirmIntegrationOperation,
   useIntegrationOperation,
 } from "@/lib/api/hooks/integration-operations";
-import type { IntegrationOperation, IntegrationOperationStatus } from "@/lib/api/types";
+import type {
+  IntegrationOperation,
+  IntegrationOperationConflict,
+  IntegrationOperationEntry,
+  IntegrationOperationStatus,
+} from "@/lib/api/types";
 import { formatDateByPreference, formatTime, type DateFormatPreference } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -52,8 +57,9 @@ function timeZoneLabel(at: Date) {
 }
 
 type ViewState = Exclude<IntegrationOperationStatus, "pending"> | "blocked";
+type StateCopy = { icon: typeof Ban; badge: string; title: string; body: string; className: string };
 
-const STATES: Record<ViewState, { icon: typeof Ban; badge: string; title: string; body: string; className: string }> = {
+const STATES: Record<ViewState, StateCopy> = {
   confirmed: {
     icon: CheckCircle2,
     badge: "Confirmed",
@@ -84,6 +90,20 @@ const STATES: Record<ViewState, { icon: typeof Ban; badge: string; title: string
   },
 };
 
+/** The same states for a correction: nothing is created, an existing entry changes. */
+const CORRECTION_STATES: Record<ViewState, StateCopy> = {
+  confirmed: { ...STATES.confirmed, title: "Entry corrected", body: "Changes saved to your timesheet." },
+  cancelled: { ...STATES.cancelled, body: "Nothing was changed. Ask the integration to prepare the correction again if you still need it." },
+  expired: {
+    ...STATES.expired,
+    body: "This preview was not confirmed within 15 minutes, so nothing was changed. Ask the integration to prepare it again.",
+  },
+  blocked: {
+    ...STATES.blocked,
+    body: "The integration token that prepared this was revoked, expired or lost the correct scope. Ask the integration to prepare it again.",
+  },
+};
+
 function Detail({ label, children, muted }: { label: string; children: React.ReactNode; muted?: boolean }) {
   return (
     <div className="grid grid-cols-[7rem_1fr] gap-3 py-2.5 text-sm sm:grid-cols-[8rem_1fr]">
@@ -107,10 +127,199 @@ function RequestedBy({ op }: { op: IntegrationOperation }) {
 }
 
 const footerLink = cn(buttonVariants({ variant: "outline" }), "w-full sm:w-auto");
+// While a request runs the buttons stay focusable (aria-disabled, clicks ignored) so focus is not lost.
+const busyButton = "aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
+
+function NewEntryPreview({ entry, dimmed, dateFormat }: { entry: IntegrationOperationEntry; dimmed: boolean; dateFormat?: DateFormatPreference }) {
+  const start = new Date(entry.startTime);
+  const weekday = start.toLocaleDateString(undefined, { weekday: "long" });
+  const sameDay = start.toDateString() === new Date(entry.endTime).toDateString();
+  return (
+    <>
+      <div className="rounded-xl border border-border/70 bg-muted/30 p-4 sm:p-5">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <CalendarClock className="h-4 w-4" />
+          <span className="capitalize">{weekday}</span>
+          <span aria-hidden>·</span>
+          <span>{formatDateByPreference(entry.startTime, dateFormat)}</span>
+        </div>
+        <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <p className="font-mono text-3xl font-semibold tabular-nums tracking-tight sm:text-4xl">
+            {formatTime(entry.startTime)}
+            <span className="px-2 text-muted-foreground">–</span>
+            {formatTime(entry.endTime)}
+          </p>
+          {!sameDay && <Badge variant="outline">ends next day</Badge>}
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {formatHours(entry.durationHours)} · {timeZoneLabel(start)}
+        </p>
+      </div>
+
+      <dl className="divide-y divide-border/60">
+        <Detail label="Description" muted={!entry.description}>
+          {entry.description ?? "No description"}
+        </Detail>
+        <Detail label="Project" muted={!entry.project}>
+          {entry.project?.name ?? "No project"}
+        </Detail>
+        <Detail label="Task" muted={!entry.task}>
+          {entry.task?.name ?? "No task"}
+        </Detail>
+        <Detail label="Billable">
+          <Badge variant={entry.isBillable && !dimmed ? "default" : "secondary"}>
+            {entry.isBillable ? "Billable" : "Non-billable"}
+          </Badge>
+        </Detail>
+      </dl>
+    </>
+  );
+}
+
+type CompareRow = { label: string; before: string; after: string; changed: boolean; mono?: boolean };
+type Field = IntegrationOperation["changedFields"][number];
+
+/** Before/after per row. A row is changed only when its field was requested and the shown value differs. */
+function compareRows(
+  changedFields: Field[],
+  before: IntegrationOperationEntry,
+  after: IntegrationOperationEntry,
+  dateFormat?: DateFormatPreference,
+): CompareRow[] {
+  const requested = new Set<Field>(changedFields);
+  const day = (iso: string) => formatDateByPreference(iso, dateFormat);
+  const row = (label: string, b: string, a: string, fields: Field[], mono?: boolean): CompareRow => ({
+    label,
+    before: b,
+    after: a,
+    changed: b !== a && fields.some((field) => requested.has(field)),
+    mono,
+  });
+  return [
+    row("Date", day(before.startTime), day(after.startTime), ["startTime"]),
+    row("Start", formatTime(before.startTime), formatTime(after.startTime), ["startTime"], true),
+    row("End", formatTime(before.endTime), formatTime(after.endTime), ["endTime"], true),
+    row("Duration", formatHours(before.durationHours), formatHours(after.durationHours), ["startTime", "endTime"], true),
+    row("Description", before.description ?? "No description", after.description ?? "No description", ["description"]),
+    row("Project", before.project?.name ?? "No project", after.project?.name ?? "No project", ["projectId"]),
+    row("Task", before.task?.name ?? "No task", after.task?.name ?? "No task", ["taskId"]),
+    row("Billable", before.isBillable ? "Billable" : "Non-billable", after.isBillable ? "Billable" : "Non-billable", ["isBillable"]),
+  ];
+}
+
+/** Current entry next to the corrected one; changed rows are marked, the rest stays as it is. */
+function CorrectionPreview({
+  op,
+  before,
+  previousBefore,
+  status,
+  dateFormat,
+}: {
+  op: IntegrationOperation;
+  before: IntegrationOperationEntry;
+  /** The `before` shown when a confirm hit `entry_changed`; rows that differ were edited elsewhere. */
+  previousBefore: IntegrationOperationEntry | null;
+  status: IntegrationOperationStatus;
+  dateFormat?: DateFormatPreference;
+}) {
+  const rows = compareRows(op.changedFields, before, op.entry, dateFormat);
+  const previous = previousBefore ? compareRows([], previousBefore, previousBefore, dateFormat) : null;
+  const changes = rows.filter((row) => row.changed && row.label !== "Duration").length;
+  const fields = changes === 1 ? "1 field" : `${changes} fields`;
+  const summary =
+    status === "pending"
+      ? `${fields} will change. Everything else stays as it is.`
+      : status === "confirmed"
+        ? `${fields} changed. Everything else stayed as it was.`
+        : `${fields} requested.`;
+  const [nowLabel, afterLabel] =
+    status === "pending" ? ["Now", "After you confirm"] : status === "confirmed" ? ["Before", "After"] : ["Before", "Requested"];
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        {summary} Times in {timeZoneLabel(new Date(op.entry.startTime))}.
+      </p>
+      <div className="overflow-hidden rounded-xl border border-border/70">
+        <div
+          aria-hidden
+          className="hidden grid-cols-[7rem_1fr_1fr] gap-3 border-b border-border/70 bg-muted/40 px-4 py-2 text-xs font-medium text-muted-foreground sm:grid"
+        >
+          <span />
+          <span>{nowLabel}</span>
+          <span>{afterLabel}</span>
+        </div>
+        <dl className="divide-y divide-border/60">
+          {rows.map((row, index) => {
+            const elsewhere = previous !== null && previous[index]!.before !== row.before;
+            const elsewhereTag = elsewhere && (
+              <span className="mt-1 flex items-center gap-1 text-xs font-medium text-sky-700 no-underline dark:text-sky-300">
+                <RefreshCw aria-hidden className="h-3 w-3 shrink-0" />
+                Changed in TempoBase
+              </span>
+            );
+            return (
+            <div
+              key={row.label}
+              data-changed={row.changed || undefined}
+              data-changed-elsewhere={elsewhere || undefined}
+              className={cn(
+                "grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1 px-4 py-2.5 text-sm sm:grid-cols-[7rem_1fr_1fr]",
+                row.changed && "bg-amber-500/10",
+              )}
+            >
+              <dt className="flex items-center gap-1.5 text-muted-foreground">
+                {row.changed && <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />}
+                {row.label}
+              </dt>
+              {row.changed ? (
+                <>
+                  <dd className="min-w-0 break-words text-muted-foreground">
+                    <span className={cn("line-through decoration-muted-foreground/60", row.mono && "font-mono tabular-nums")}>
+                      <span className="sr-only">Changes from </span>
+                      {row.before}
+                    </span>
+                    {elsewhereTag}
+                  </dd>
+                  <dd
+                    className={cn(
+                      "col-start-2 flex min-w-0 items-start gap-1.5 break-words font-semibold text-foreground sm:col-start-auto",
+                      row.mono && "font-mono tabular-nums",
+                    )}
+                  >
+                    <ArrowRight aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 sm:hidden" />
+                    <span className="sr-only">to </span>
+                    {row.after}
+                  </dd>
+                </>
+              ) : (
+                <>
+                  <dd className="min-w-0 break-words font-normal text-muted-foreground">
+                    <span className={cn(row.mono && "font-mono tabular-nums")}>{row.before}</span>
+                    {elsewhereTag}
+                  </dd>
+                  <dd className="hidden font-normal text-muted-foreground sm:block">
+                    <span className="sr-only">Unchanged</span>
+                    <span aria-hidden>Unchanged</span>
+                  </dd>
+                </>
+              )}
+            </div>
+            );
+          })}
+        </dl>
+      </div>
+    </div>
+  );
+}
 
 function OperationCard({ op, dateFormat }: { op: IntegrationOperation; dateFormat?: DateFormatPreference }) {
   const confirm = useConfirmIntegrationOperation(op.id);
   const cancel = useCancelIntegrationOperation(op.id);
+  // The preview's `before` when a confirm hit `entry_changed`; null when there is no conflict to show.
+  const [conflictFrom, setConflictFrom] = useState<IntegrationOperationEntry | null>(null);
+  const conflictRef = useRef<HTMLDivElement>(null);
+  const statusRef = useRef<HTMLDivElement>(null);
+  const isCorrection = op.kind === "correct_entry" && op.before !== null;
   const now = useNow(op.status === "pending");
   const remainingMs = new Date(op.expiresAt).getTime() - now;
   const status: IntegrationOperationStatus = op.status === "pending" && remainingMs <= 0 ? "expired" : op.status;
@@ -119,16 +328,36 @@ function OperationCard({ op, dateFormat }: { op: IntegrationOperation; dateForma
   const viewState: ViewState | null = blocked ? "blocked" : status === "pending" ? null : status;
   const dimmed = viewState !== null && viewState !== "confirmed";
   const busy = confirm.isPending || cancel.isPending;
-  const { entry } = op;
-  const start = new Date(entry.startTime);
-  const weekday = start.toLocaleDateString(undefined, { weekday: "long" });
-  const sameDay = start.toDateString() === new Date(entry.endTime).toDateString();
-  const state = viewState ? STATES[viewState] : null;
+  const state = viewState ? (isCorrection ? CORRECTION_STATES : STATES)[viewState] : null;
+  const noun = isCorrection ? "entry correction" : "new time entry";
+
+  const conflict = conflictFrom !== null && confirmable;
+
+  // Move focus to the banner that replaces the clicked button, so keyboard and screen reader users follow.
+  useEffect(() => {
+    if (!conflict) return;
+    conflictRef.current?.scrollIntoView?.({ block: "nearest" });
+    conflictRef.current?.focus();
+  }, [conflict, conflictFrom]);
+  const shownState = useRef(viewState);
+  useEffect(() => {
+    if (viewState === shownState.current) return;
+    shownState.current = viewState;
+    statusRef.current?.focus();
+  }, [viewState]);
 
   const run = async (action: typeof confirm, failure: string) => {
+    if (busy) return;
+    const shownBefore = op.before;
+    setConflictFrom(null);
     try {
       await action.mutateAsync();
     } catch (err) {
+      // The refreshed preview is already on screen; the banner explains why it changed.
+      if (err instanceof ApiError && (err.data as Partial<IntegrationOperationConflict> | undefined)?.code === "entry_changed") {
+        setConflictFrom(shownBefore);
+        return;
+      }
       toast.error(failure, { description: getApiErrorMessage(err, failure) });
     }
   };
@@ -139,7 +368,9 @@ function OperationCard({ op, dateFormat }: { op: IntegrationOperation; dateForma
         <RequestedBy op={op} />
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-semibold tracking-tight">{confirmable ? "Confirm new time entry" : "New time entry"}</h1>
+            <h1 className="text-xl font-semibold tracking-tight">
+              {confirmable ? `Confirm ${noun}` : noun.charAt(0).toUpperCase() + noun.slice(1)}
+            </h1>
             {state && dimmed && <Badge variant="outline">{state.badge}</Badge>}
           </div>
           <p className="text-sm text-muted-foreground">
@@ -153,57 +384,56 @@ function OperationCard({ op, dateFormat }: { op: IntegrationOperation; dateForma
       </CardHeader>
 
       <CardContent className="space-y-5">
+        {conflict && (
+          <div
+            ref={conflictRef}
+            tabIndex={-1}
+            role="alert"
+            className="flex gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-amber-800 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 dark:text-amber-300"
+          >
+            <RefreshCw className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium">This entry changed after the preview</p>
+              <p className="text-sm opacity-90">
+                Nothing was saved. The preview now shows the entry as it is, and rows marked “Changed in TempoBase” were edited
+                elsewhere. Check them and confirm again.
+              </p>
+            </div>
+          </div>
+        )}
+
         {state && (
-          <div role="status" className={cn("flex gap-3 rounded-xl border p-4", state.className)}>
+          <div
+            ref={statusRef}
+            tabIndex={-1}
+            role="status"
+            className={cn("flex gap-3 rounded-xl border p-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50", state.className)}
+          >
             <state.icon className="mt-0.5 h-4 w-4 shrink-0" />
             <div className="space-y-1">
               <p className="text-sm font-medium">{state.title}</p>
               <p className="text-sm opacity-90">
                 {viewState === "confirmed" && op.entryDeleted
-                  ? "This entry was saved and later deleted from your timesheet."
+                  ? `This entry was ${isCorrection ? "corrected" : "saved"} and later deleted from your timesheet.`
                   : state.body}
               </p>
             </div>
           </div>
         )}
 
-        <div className={cn("space-y-5", dimmed && "opacity-70")}>
-          <div className="rounded-xl border border-border/70 bg-muted/30 p-4 sm:p-5">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <CalendarClock className="h-4 w-4" />
-              <span className="capitalize">{weekday}</span>
-              <span aria-hidden>·</span>
-              <span>{formatDateByPreference(entry.startTime, dateFormat)}</span>
-            </div>
-            <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <p className="font-mono text-3xl font-semibold tabular-nums tracking-tight sm:text-4xl">
-                {formatTime(entry.startTime)}
-                <span className="px-2 text-muted-foreground">–</span>
-                {formatTime(entry.endTime)}
-              </p>
-              {!sameDay && <Badge variant="outline">ends next day</Badge>}
-            </div>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {formatHours(entry.durationHours)} · {timeZoneLabel(start)}
-            </p>
-          </div>
-
-          <dl className="divide-y divide-border/60">
-            <Detail label="Description" muted={!entry.description}>
-              {entry.description ?? "No description"}
-            </Detail>
-            <Detail label="Project" muted={!entry.project}>
-              {entry.project?.name ?? "No project"}
-            </Detail>
-            <Detail label="Task" muted={!entry.task}>
-              {entry.task?.name ?? "No task"}
-            </Detail>
-            <Detail label="Billable">
-              <Badge variant={entry.isBillable && !dimmed ? "default" : "secondary"}>
-                {entry.isBillable ? "Billable" : "Non-billable"}
-              </Badge>
-            </Detail>
-          </dl>
+        {/* NOTE: correction rows are not dimmed; opacity on muted text fails contrast in the light theme. */}
+        <div className={cn("space-y-5", dimmed && !isCorrection && "opacity-70")}>
+          {isCorrection ? (
+            <CorrectionPreview
+              op={op}
+              before={op.before!}
+              previousBefore={conflict ? conflictFrom : null}
+              status={status}
+              dateFormat={dateFormat}
+            />
+          ) : (
+            <NewEntryPreview entry={op.entry} dimmed={dimmed} dateFormat={dateFormat} />
+          )}
         </div>
 
         {confirmable && (
@@ -212,6 +442,9 @@ function OperationCard({ op, dateFormat }: { op: IntegrationOperation; dateForma
               <span className="flex items-center gap-1.5">
                 <Clock className="h-3.5 w-3.5" />
                 Expires in <span className="font-mono tabular-nums text-foreground">{formatCountdown(remainingMs)}</span>
+              </span>
+              <span aria-live="polite" className="font-medium text-amber-700 dark:text-amber-300">
+                {remainingMs < WARN_MS ? "Less than 2 minutes left" : ""}
               </span>
             </div>
             <div
@@ -238,13 +471,22 @@ function OperationCard({ op, dateFormat }: { op: IntegrationOperation; dateForma
       <CardFooter className="flex flex-col-reverse gap-2 border-t sm:flex-row sm:justify-end">
         {status === "pending" ? (
           <>
-            <Button variant="outline" disabled={busy} onClick={() => void run(cancel, "Could not cancel.")} className="w-full sm:w-auto">
+            <Button
+              variant="outline"
+              aria-disabled={busy}
+              onClick={() => void run(cancel, "Could not cancel.")}
+              className={cn("w-full sm:w-auto", busyButton)}
+            >
               {cancel.isPending ? "Cancelling…" : "Cancel"}
             </Button>
             {confirmable && (
-              <Button disabled={busy} onClick={() => void run(confirm, "Could not create the entry.")} className="w-full sm:w-auto">
+              <Button
+                aria-disabled={busy}
+                onClick={() => void run(confirm, isCorrection ? "Could not correct the entry." : "Could not create the entry.")}
+                className={cn("w-full sm:w-auto", busyButton)}
+              >
                 <Check className="mr-2 h-4 w-4" />
-                {confirm.isPending ? "Saving…" : "Confirm and save"}
+                {confirm.isPending ? "Saving…" : isCorrection ? "Confirm correction" : "Confirm and save"}
               </Button>
             )}
           </>

@@ -43,20 +43,20 @@
 
 ### Integration tokens (local MCP)
 
-Personal tokens let the local TempoBase MCP (`extensions/tempobase-mcp`) call the API without Auth.js cookies. Scopes: `read` (always) and `create` (opt-in, prepares entries that the user confirms in the app).
+Personal tokens let the local TempoBase MCP (`extensions/tempobase-mcp`) call the API without Auth.js cookies. Scopes: `read` (always), `create` (opt-in, prepares new entries) and `correct` (opt-in, prepares changes to existing entries). The user confirms every write in the app.
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | GET | `/api/account/integration-tokens` | Session | List the caller's non-revoked tokens (no hash, no token) |
-| POST | `/api/account/integration-tokens` | Session | Issue a token: `{ name, expiresInDays, scopes? }` (1 to 90 days, default 30; `scopes: ["create"]` adds `create`, refused with 403 for Viewer). `read` is always granted. Returns the plain token once. Audited. |
+| POST | `/api/account/integration-tokens` | Session | Issue a token: `{ name, expiresInDays, scopes? }` (1 to 90 days, default 30; `scopes` may add `create` and `correct`, refused with 403 for Viewer). `read` is always granted. Returns the plain token once. Audited. |
 | DELETE | `/api/account/integration-tokens/[id]` | Session | Revoke one of the caller's tokens. Audited. |
 | GET | `/api/integrations/v1/hours` | Bearer | Total and billable hours: `from`, `to` (YYYY-MM-DD, required), `projectId`, `taskId`, `description`, `roundUp` |
 | GET | `/api/integrations/v1/projects` | Bearer | Accessible projects and their accessible registered tasks: `q`, `limit` (default 50, max 100); returns `hasMore` |
 | GET | `/api/integrations/v1/time-entries` | Bearer | The caller's own entries, newest first (ties broken by id): `from`, `to`, `projectId`, `taskId`, `description`, `page`, `pageSize` (max 100); returns `hasMore` |
-| POST | `/api/integrations/v1/operations` | Bearer `create` | Prepare a manual entry: `{ idempotencyKey, startTime, endTime, description?, projectId?, taskId?, isBillable }` (ISO UTC instants). Writes no entry. Returns the operation (201, or 200 for a repeated key, re-opening a cancelled or expired one) with `confirmUrl` |
-| GET | `/api/integrations/v1/operations/[id]` | Bearer `create` | Status of the caller's own operation and `entryId` once confirmed |
+| POST | `/api/integrations/v1/operations` | Bearer `create` or `correct` | Prepare a manual entry (`create`): `{ idempotencyKey, startTime, endTime, description?, projectId?, taskId?, isBillable }` (ISO UTC instants). Or prepare a correction (`correct`): `{ kind: "correct_entry", idempotencyKey, entryId, startTime?, endTime?, description?, projectId?, taskId?, isBillable? }` with only the fields to change (`null` clears description, project or task). Writes no entry. Returns the operation (201, or 200 for a repeated key, re-opening a cancelled or expired one) with `confirmUrl` |
+| GET | `/api/integrations/v1/operations/[id]` | Bearer, scope of the operation's kind | Status of the caller's own operation; `entryId` once confirmed, or the corrected entry |
 | GET | `/api/account/integration-operations/[id]` | Session | Preview of the caller's own operation |
-| POST | `/api/account/integration-operations/[id]/confirm` | Session | Create the entry. Audited |
+| POST | `/api/account/integration-operations/[id]/confirm` | Session | Create the entry or apply the correction. Audited |
 | POST | `/api/account/integration-operations/[id]/cancel` | Session | Discard a pending operation. Audited |
 
 - Tokens look like `tbp_<43 base64url chars>`. Only the SHA-256 hex hash is stored.
@@ -77,6 +77,17 @@ The `create` scope never writes an entry by itself. The MCP prepares an operatio
 - Only the operation's user sees it: another user of the same account (also Owner/Admin) or another account gets 404.
 - Confirm re-checks the token (not revoked or expired, still has `create`: 403 otherwise), the role, project/task access and the entry rules. It flips `pending -> confirmed` and inserts the entry in one transaction, so a double click or concurrent confirms create one entry; a repeated confirm returns 200 with the same `entryId`. Cancelled or expired operations return 409.
 - The entry audit row has the confirming user as actor and `integrationTokenId`, `integrationTokenName` and `operationId` in `changesJson`. Cancel writes an `IntegrationOperation` / `cancel` audit row.
+
+### Integration corrections (correct with confirmation)
+
+The `correct` scope, separate from `create`, prepares a `correct_entry` operation for one of the caller's own entries. It follows the same prepare, confirm, cancel, idempotency and expiry rules as `create_entry`.
+
+- Prepare loads the entry by `entryId` for the token owner only, also for Owner and Admin. Another user's or account's entry, or a deleted one, returns 404; a running timer returns 409. A correction that changes nothing returns 400.
+- The rules are those of `PUT /api/time-entries/[id]` on the entry plus the changes: the entry's project still in access, new project and task in the account and access, active project only when the project changes, end after start, at most 24 hours. A task must belong to the resulting project, otherwise 400 asks for `taskId` (`null` clears it).
+- Prepare stores `before`, the entry's six previewed fields at that moment. The view returns `before`, `entry` (the result after the changes) and `changedFields`. A re-opened cancelled or expired correction takes a fresh `before`.
+- Confirm flips the operation and updates the entry in one transaction. The update matches the entry only while its fields still equal `before` (`updateMany` with those values in `where`), and writes only the fields in `changes`, plus duration and `entry_date` when a time changes. Tags and other fields stay as they are. The comparison is by value, not `updatedAt`, because a tag-only change bumps `updatedAt` without touching what the preview showed.
+- If the entry changed after the preview, nothing is written and confirm returns 409 `{ code: "entry_changed", operation }`. The operation stays `pending` with `before` refreshed and a new 15-minute expiry, and the page shows the new before/after to confirm again. A deleted entry or one that became a running timer returns 409 without refreshing.
+- The audit row is `TimeEntry` / `update` with the confirming user as actor and `before`, `after`, `integrationTokenId`, `integrationTokenName` and `operationId` in `changesJson`, like an edit in the app.
 
 ### Report round-up
 

@@ -281,33 +281,49 @@ export interface CreateIntegrationTokenRequest {
   name: string;
   expiresInDays: number;
   /** "read" is always granted; pass "create" to also allow preparing entries. */
-  scopes: Array<"create">;
+  scopes: Array<"create" | "correct">;
 }
 
 export type IntegrationOperationStatus = "pending" | "confirmed" | "cancelled" | "expired";
 
+export interface IntegrationOperationEntry {
+  startTime: string;
+  endTime: string;
+  durationHours: number;
+  description: string | null;
+  isBillable: boolean;
+  project: { id: string; name: string } | null;
+  task: { id: string; name: string } | null;
+}
+
+export type IntegrationOperationField = "startTime" | "endTime" | "description" | "projectId" | "taskId" | "isBillable";
+
 export interface IntegrationOperation {
   id: string;
-  kind: "create_entry";
+  kind: "create_entry" | "correct_entry";
   status: IntegrationOperationStatus;
   expiresAt: string;
   createdAt: string;
   confirmedAt: string | null;
   cancelledAt: string | null;
+  /** The created entry once confirmed; for a correction, the entry it targets. */
   entryId: string | null;
   /** True when the operation was confirmed and its entry was deleted afterwards. */
   entryDeleted: boolean;
-  entry: {
-    startTime: string;
-    endTime: string;
-    durationHours: number;
-    description: string | null;
-    isBillable: boolean;
-    project: { id: string; name: string } | null;
-    task: { id: string; name: string } | null;
-  };
-  /** tokenUsable is false once the token is revoked, expired or without `create`. */
+  /** What confirming saves: the new entry, or the corrected entry. */
+  entry: IntegrationOperationEntry;
+  /** For a correction, the entry as it is now; null for a new entry. */
+  before: IntegrationOperationEntry | null;
+  changedFields: IntegrationOperationField[];
+  /** tokenUsable is false once the token is revoked, expired or without the scope this kind needs. */
   integration: { name: string; tokenPrefix: string; tokenUsable: boolean };
+}
+
+/** Body of a 409 from confirm when the entry changed after a correction's preview. */
+export interface IntegrationOperationConflict {
+  error: string;
+  code: "entry_changed";
+  operation: IntegrationOperation;
 }
 
 // ─── Account & Profile ─────────────────────────────────────────────────────

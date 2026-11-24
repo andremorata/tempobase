@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildEntryPayload, confirmUrlFor, idempotencyKeyFor, localToUtc, nextStepFor } from "./entries.ts";
+import { buildCorrectionChanges, buildEntryPayload, confirmUrlFor, correctionKeyFor, idempotencyKeyFor, localToUtc, nextStepFor } from "./entries.ts";
 
 const SAO_PAULO = "America/Sao_Paulo";
 const NEW_YORK = "America/New_York";
@@ -75,4 +75,41 @@ test("tells the agent a deleted result needs a new idempotencyKey", () => {
   assert.match(nextStepFor({ status: "confirmed", entryDeleted: false }), /entry exists/);
   assert.match(nextStepFor({ status: "confirmed", entryDeleted: true }), /deleted.*new idempotencyKey/);
   assert.match(nextStepFor({ status: "cancelled", entryDeleted: false }), /re-opens/);
+});
+
+test("a correction carries only the requested fields, and null clears", () => {
+  assert.deepEqual(buildCorrectionChanges({ entryId: "e1", date: "2026-11-20", endTime: "17:00" }, SAO_PAULO), {
+    endTime: "2026-11-20T20:00:00.000Z",
+  });
+  assert.deepEqual(buildCorrectionChanges({ entryId: "e1", description: "  Reviews ", projectId: null, taskId: null, billable: false }, SAO_PAULO), {
+    description: "Reviews",
+    projectId: null,
+    taskId: null,
+    isBillable: false,
+  });
+  assert.deepEqual(buildCorrectionChanges({ entryId: "e1", description: null }, SAO_PAULO), { description: null });
+});
+
+test("a correction refuses a time without its date, nothing to change, and an end before the start", () => {
+  assert.throws(() => buildCorrectionChanges({ entryId: "e1", endTime: "17:00" }, SAO_PAULO), /date is required/);
+  assert.throws(() => buildCorrectionChanges({ entryId: "e1" }, SAO_PAULO), /Nothing to correct/);
+  assert.throws(
+    () => buildCorrectionChanges({ entryId: "e1", date: "2026-11-20", startTime: "18:00", endTime: "17:00" }, SAO_PAULO),
+    /endDate/,
+  );
+  const overnight = buildCorrectionChanges({ entryId: "e1", date: "2026-11-20", endTime: "01:00", endDate: "2026-11-21" }, SAO_PAULO);
+  assert.equal(overnight.endTime, "2026-11-21T04:00:00.000Z");
+});
+
+test("the correction key is stable per entry and changes, and tells a cleared field from an unsent one", () => {
+  const a = correctionKeyFor("e1", { description: "Reviews" });
+  assert.equal(a, correctionKeyFor("e1", { description: "Reviews" }));
+  assert.notEqual(a, correctionKeyFor("e2", { description: "Reviews" }));
+  assert.notEqual(correctionKeyFor("e1", { description: null }), correctionKeyFor("e1", {}));
+  assert.match(a, /^mcp-fix-[0-9a-f]{28}$/);
+});
+
+test("next steps for a correction speak of changes, not new entries", () => {
+  assert.match(nextStepFor({ kind: "correct_entry", status: "pending", entryDeleted: false }), /Nothing is changed yet/);
+  assert.match(nextStepFor({ kind: "correct_entry", status: "cancelled", entryDeleted: false }), /prepare_time_entry_correction/);
 });

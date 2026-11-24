@@ -6,7 +6,7 @@
 import { Prisma } from "@prisma/client";
 import { hashIntegrationToken } from "@/lib/auth/integration-tokens";
 
-type Filter = string | boolean | null | { in?: string[]; gte?: Date; lte?: Date; contains?: string };
+type Filter = string | boolean | null | { in?: string[]; gte?: Date; lte?: Date; lt?: Date; contains?: string };
 type Where = Record<string, unknown>;
 
 function matches(value: unknown, filter: Filter | undefined): boolean {
@@ -15,11 +15,12 @@ function matches(value: unknown, filter: Filter | undefined): boolean {
   if (filter.in && !filter.in.includes(value as string)) return false;
   if (filter.gte && (value as Date) < filter.gte) return false;
   if (filter.lte && (value as Date) > filter.lte) return false;
+  if (filter.lt && !((value as Date) < filter.lt)) return false;
   if (filter.contains !== undefined && !String(value ?? "").toLowerCase().includes(filter.contains.toLowerCase())) return false;
   return true;
 }
 
-const SCALAR_KEYS = ["id", "accountId", "userId", "projectId", "taskId", "isDeleted", "isRunning", "isBillable", "entryDate", "description", "name", "status"];
+const SCALAR_KEYS = ["id", "accountId", "userId", "projectId", "taskId", "isDeleted", "isRunning", "isBillable", "entryDate", "startTime", "endTime", "description", "name", "status"];
 
 function matchesWhere(row: Record<string, unknown>, where: Where): boolean {
   return SCALAR_KEYS.every((key) => matches(row[key], where[key] as Filter | undefined));
@@ -153,9 +154,24 @@ export function createFakeDb(now: Date) {
 
   let txChain: Promise<unknown> = Promise.resolve();
   const prisma = {
-    // Serialized, like Postgres row locks on the operation being confirmed.
+    // Serialized, like Postgres row locks on the operation being confirmed. A throw rolls back
+    // the rows the routes write in transactions (operations and time entries).
     $transaction: <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => {
-      const run = txChain.then(() => fn(prisma));
+      const run = txChain.then(async () => {
+        const saved = [operations, timeEntries].map((rows) => rows.map((row) => [row, { ...row }] as const));
+        try {
+          return await fn(prisma);
+        } catch (error) {
+          [operations, timeEntries].forEach((rows, i) => {
+            rows.length = saved[i]!.length;
+            saved[i]!.forEach(([row, copy]) => {
+              for (const key of Object.keys(row)) delete (row as Record<string, unknown>)[key];
+              Object.assign(row, copy);
+            });
+          });
+          throw error;
+        }
+      });
       txChain = run.catch(() => undefined);
       return run;
     },
@@ -244,7 +260,15 @@ export function createFakeDb(now: Date) {
         return row;
       },
       findUniqueOrThrow: async ({ where }: { where: { id: string } }) => ({ ...timeEntries.find((e) => e.id === where.id)!, tags: [] }),
-      findFirst: async ({ where }: { where: Where }) => timeEntries.find((e) => matchesWhere(e, where)) ?? null,
+      updateMany: async ({ where, data }: { where: Where; data: Record<string, unknown> }) => {
+        const rows = timeEntries.filter((e) => matchesWhere(e, where));
+        rows.forEach((e) => Object.assign(e, data));
+        return { count: rows.length };
+      },
+      findFirst: async ({ where }: { where: Where }) => {
+        const row = timeEntries.find((e) => matchesWhere(e, where));
+        return row ? { ...row } : null;
+      },
       findMany: async ({
         where,
         skip = 0,
