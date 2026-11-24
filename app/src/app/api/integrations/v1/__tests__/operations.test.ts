@@ -56,9 +56,9 @@ const sessionOf = (id: string) => {
 };
 
 const statusOf = (token: string, id: string) => send(getStatus, `/api/integrations/v1/operations/${id}`, { token, id });
-const confirmAs = (userId: string, id: string) => {
+const confirmAs = (userId: string, id: string, body?: Record<string, unknown>) => {
   state.session = sessionOf(userId);
-  return send(confirm, `/api/account/integration-operations/${id}/confirm`, { id, method: "POST" });
+  return send(confirm, `/api/account/integration-operations/${id}/confirm`, { id, method: "POST", body });
 };
 const cancelAs = (userId: string, id: string) => {
   state.session = sessionOf(userId);
@@ -414,5 +414,374 @@ describe("integration operations", () => {
 
     expect(status).toBe(200);
     expect(body).toMatchObject({ id: op.id, status: "pending", integration: { name: "Raycast" }, entry: { description: "Review PR #42" } });
+  });
+});
+
+describe("entry corrections", () => {
+  let tokens: Record<"member" | "memberCreate" | "memberA2" | "admin" | "viewer" | "ownerB", string>;
+  const correct = { scopes: ["read", "correct"] };
+  const entryOf = (userId: string) => state.db.timeEntries.find((e) => e.userId === userId && !e.isRunning && !e.isDeleted)!;
+  /** Confirms the preview the owner currently sees, as the page does. */
+  const confirmSeen = async (userId: string, id: string) => {
+    const { body: view } = await viewAs(userId, id);
+    return confirmAs(userId, id, { previewVersion: view.previewVersion });
+  };
+  const prepareCorrection = (token: string, body: Record<string, unknown>) =>
+    send(prepare, "/api/integrations/v1/operations", { token, body: { kind: "correct_entry", idempotencyKey: "fix-1", ...body } });
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    state.db = createFakeDb(NOW);
+    state.session = null;
+    tokens = {
+      member: state.db.addToken(ids.memberA, correct),
+      memberCreate: state.db.addToken(ids.memberA, { scopes: ["read", "create"] }),
+      memberA2: state.db.addToken(ids.memberA2, correct),
+      admin: state.db.addToken(ids.adminA, correct),
+      viewer: state.db.addToken(ids.viewerA, correct),
+      ownerB: state.db.addToken(ids.ownerB, correct),
+    };
+  });
+
+  describe("prepare", () => {
+    it("previews before and after with the changed fields and writes nothing", async () => {
+      const entry = entryOf(ids.memberA);
+      const original = { ...entry };
+
+      const { status, body } = await prepareCorrection(tokens.member, {
+        entryId: entry.id,
+        endTime: "2026-11-20T10:30:00.000Z",
+        description: "Reviews",
+      });
+
+      expect(status).toBe(201);
+      expect(body).toMatchObject({
+        kind: "correct_entry",
+        status: "pending",
+        entryId: entry.id,
+        changedFields: ["endTime", "description"],
+        before: {
+          startTime: "2026-11-20T09:00:00.000Z",
+          endTime: "2026-11-20T10:00:00.000Z",
+          durationHours: 1,
+          description: null,
+          project: { id: ids.projectA1, name: "Alpha" },
+          task: null,
+          isBillable: false,
+        },
+        entry: {
+          startTime: "2026-11-20T09:00:00.000Z",
+          endTime: "2026-11-20T10:30:00.000Z",
+          durationHours: 1.5,
+          description: "Reviews",
+          project: { id: ids.projectA1, name: "Alpha" },
+        },
+      });
+      expect(body.confirmUrl).toBe(`http://localhost/integrations/operations/${body.id}`);
+      expect(entry).toEqual(original);
+    });
+
+    it("needs the correct scope, separate from create, and a role that tracks time", async () => {
+      const own = entryOf(ids.memberA).id;
+      expect((await prepareCorrection(tokens.memberCreate, { entryId: own, isBillable: true })).status).toBe(403);
+      expect((await prepareCorrection(tokens.viewer, { entryId: own, isBillable: true })).status).toBe(403);
+      expect(state.db.operations).toHaveLength(0);
+    });
+
+    it("returns the same operation for the same key and changes, and 409 for different ones", async () => {
+      const entryId = entryOf(ids.memberA).id;
+      const first = await prepareCorrection(tokens.member, { entryId, description: "Reviews" });
+      const retry = await prepareCorrection(tokens.member, { entryId, description: " Reviews " });
+      const other = await prepareCorrection(tokens.member, { entryId, description: "Planning" });
+
+      expect(retry).toMatchObject({ status: 200, body: { id: first.body.id } });
+      expect(other.status).toBe(409);
+      expect(state.db.operations).toHaveLength(1);
+    });
+
+    it("re-opens a cancelled correction with a fresh snapshot of the entry", async () => {
+      const entry = entryOf(ids.memberA);
+      const { body: op } = await prepareCorrection(tokens.member, { entryId: entry.id, isBillable: true });
+      await cancelAs(ids.memberA, op.id);
+      entry.description = "edited in the app";
+
+      const { status, body } = await prepareCorrection(tokens.member, { entryId: entry.id, isBillable: true });
+
+      expect(status).toBe(200);
+      expect(body).toMatchObject({ id: op.id, status: "pending", before: { description: "edited in the app" } });
+    });
+
+    it.each([
+      ["another user's entry in the same account", () => entryOf(ids.memberA2).id, {}, 404],
+      ["another account's entry", () => entryOf(ids.ownerB).id, {}, 404],
+      ["an unknown entry", () => ids.missing, {}, 404],
+      ["a project outside the member's access", () => entryOf(ids.memberA).id, { projectId: ids.projectA2 }, 404],
+      ["another account's project", () => entryOf(ids.memberA).id, { projectId: ids.projectB }, 404],
+      ["a task of another project", () => entryOf(ids.memberA).id, { taskId: ids.taskA2 }, 400],
+      ["an end before the start", () => entryOf(ids.memberA).id, { endTime: "2026-11-20T08:00:00.000Z" }, 400],
+      ["values the entry already has", () => entryOf(ids.memberA).id, { isBillable: false }, 400],
+      ["no field to change", () => entryOf(ids.memberA).id, { isBillable: undefined }, 400],
+    ] as const)("rejects %s", async (_label, target, change, expected) => {
+      const { status } = await prepareCorrection(tokens.member, { entryId: target(), isBillable: true, ...change });
+      expect(status).toBe(expected);
+      expect(state.db.operations).toHaveLength(0);
+    });
+
+    it("rejects a deleted entry, a running timer and an inactive target project for an admin too", async () => {
+      const deleted = state.db.timeEntries.find((e) => e.userId === ids.adminA && e.isDeleted)!;
+      const running = state.db.timeEntries.find((e) => e.userId === ids.adminA && e.isRunning)!;
+      const own = state.db.timeEntries.find((e) => e.userId === ids.adminA && e.projectId === ids.projectA1 && !e.taskId)!;
+
+      expect((await prepareCorrection(tokens.admin, { entryId: deleted.id, isBillable: true })).status).toBe(404);
+      expect((await prepareCorrection(tokens.admin, { entryId: running.id, isBillable: true })).status).toBe(409);
+      expect((await prepareCorrection(tokens.admin, { entryId: own.id, projectId: ids.projectA2 })).status).toBe(409);
+      expect((await prepareCorrection(tokens.admin, { entryId: entryOf(ids.memberA).id, isBillable: true })).status).toBe(404);
+    });
+
+    it("keeps an entry on an inactive project correctable when the project does not change", async () => {
+      const onInactive = state.db.timeEntries.find((e) => e.userId === ids.adminA && e.projectId === ids.projectA2 && !e.isDeleted && !e.isRunning)!;
+      expect((await prepareCorrection(tokens.admin, { entryId: onInactive.id, description: "notes" })).status).toBe(201);
+    });
+  });
+
+  describe("confirm", () => {
+    it("writes only the requested fields and audits user, integration and before/after", async () => {
+      const entry = entryOf(ids.memberA);
+      const original = { ...entry };
+      const { body: op } = await prepareCorrection(tokens.member, { entryId: entry.id, endTime: "2026-11-20T10:30:00.000Z" });
+
+      const { status, body } = await confirmSeen(ids.memberA, op.id);
+
+      expect(status).toBe(200);
+      expect(body).toMatchObject({ status: "confirmed", entryId: entry.id, changedFields: ["endTime"] });
+      expect(entry).toMatchObject({
+        startTime: original.startTime,
+        endTime: new Date("2026-11-20T10:30:00.000Z"),
+        duration: 5_400_000,
+        durationDecimal: 1.5,
+        description: original.description,
+        projectId: original.projectId,
+        taskId: original.taskId,
+        isBillable: original.isBillable,
+        userId: ids.memberA,
+      });
+
+      const audit = state.db.auditLogs.find((log) => log.entityId === entry.id)!;
+      expect(audit).toMatchObject({ actorUserId: ids.memberA, action: "update", entityType: "TimeEntry" });
+      const token = state.db.tokens.find((t) => t.userId === ids.memberA && (t.scopes as string[]).includes("correct"))!;
+      expect(JSON.parse(audit.changesJson as string)).toMatchObject({
+        before: { endTime: "2026-11-20T10:00:00.000Z", duration: null },
+        after: { endTime: "2026-11-20T10:30:00.000Z", duration: 5_400_000 },
+        integrationTokenId: token.id,
+        integrationTokenName: "Raycast",
+        operationId: op.id,
+      });
+    });
+
+    it("does not touch time fields when only the description changes", async () => {
+      const entry = entryOf(ids.memberA);
+      const original = { ...entry };
+      const { body: op } = await prepareCorrection(tokens.member, { entryId: entry.id, description: "Reviews" });
+
+      await confirmSeen(ids.memberA, op.id);
+
+      expect(entry).toMatchObject({ ...original, description: "Reviews" });
+      expect(entry).not.toHaveProperty("duration");
+    });
+
+    it("refuses to overwrite an edit made in the app after the preview and asks for a new confirmation", async () => {
+      const entry = entryOf(ids.memberA);
+      const { body: op } = await prepareCorrection(tokens.member, { entryId: entry.id, endTime: "2026-11-20T10:30:00.000Z" });
+      vi.setSystemTime(new Date(NOW.getTime() + 10 * 60_000));
+      // Edited in the app between preview and confirm.
+      entry.description = "edited in the app";
+      entry.isBillable = true;
+
+      const conflict = await confirmSeen(ids.memberA, op.id);
+
+      expect(conflict.status).toBe(409);
+      expect(conflict.body).toMatchObject({
+        code: "entry_changed",
+        operation: {
+          status: "pending",
+          expiresAt: "2026-11-22T12:25:00.000Z",
+          before: { description: "edited in the app", isBillable: true, endTime: "2026-11-20T10:00:00.000Z" },
+          entry: { description: "edited in the app", isBillable: true, endTime: "2026-11-20T10:30:00.000Z" },
+        },
+      });
+      expect(entry).toMatchObject({ endTime: new Date("2026-11-20T10:00:00.000Z"), description: "edited in the app" });
+      expect(state.db.auditLogs.filter((log) => log.entityId === entry.id)).toHaveLength(0);
+
+      const again = await confirmSeen(ids.memberA, op.id);
+
+      expect(again.body.status).toBe("confirmed");
+      expect(entry).toMatchObject({ endTime: new Date("2026-11-20T10:30:00.000Z"), description: "edited in the app", isBillable: true });
+    });
+
+    it("writes once for repeated and concurrent confirms", async () => {
+      const entry = entryOf(ids.memberA);
+      const { body: op } = await prepareCorrection(tokens.member, { entryId: entry.id, description: "Reviews" });
+
+      state.session = sessionOf(ids.memberA);
+      const results = await Promise.all([
+        send(confirm, "/x", { id: op.id, body: { previewVersion: op.previewVersion } }),
+        send(confirm, "/x", { id: op.id, body: { previewVersion: op.previewVersion } }),
+      ]);
+      const again = await confirmSeen(ids.memberA, op.id);
+      const retry = await prepareCorrection(tokens.member, { entryId: entry.id, description: "Reviews" });
+
+      expect([...results, again].map((r) => [r.status, r.body.status])).toEqual([
+        [200, "confirmed"],
+        [200, "confirmed"],
+        [200, "confirmed"],
+      ]);
+      expect(retry.body).toMatchObject({ id: op.id, status: "confirmed" });
+      expect(state.db.auditLogs.filter((log) => log.entityId === entry.id)).toHaveLength(1);
+    });
+
+    it.each([
+      ["the entry was deleted", (e: { isDeleted: boolean }) => { e.isDeleted = true; }, 409],
+      ["the entry became a running timer", (e: { isRunning: boolean }) => { e.isRunning = true; }, 409],
+      ["the token lost the correct scope", () => { state.db.tokens.find((t) => t.userId === ids.memberA)!.scopes = ["read", "create"]; }, 403],
+      ["the user lost access to the entry's project", () => { state.db.projectAccess[0]!.projectId = ids.projectA2; }, 404],
+      ["the operation expired", () => vi.setSystemTime(new Date(NOW.getTime() + 15 * 60_000)), 409],
+    ] as const)("writes nothing when %s", async (_label, change, expected) => {
+      const entry = entryOf(ids.memberA);
+      const { body: op } = await prepareCorrection(tokens.member, { entryId: entry.id, description: "Reviews" });
+      change(entry as never);
+
+      const { status } = await confirmSeen(ids.memberA, op.id);
+
+      expect(status).toBe(expected);
+      expect(entry.description).toBeNull();
+      expect(state.db.operations[0]!.resultEntryId).toBeNull();
+    });
+
+    it.each([
+      ["another user in the same account", ids.memberA2],
+      ["an admin of the same account", ids.adminA],
+      ["a user of another account", ids.ownerB],
+    ])("returns 404 to %s", async (_label, userId) => {
+      const entry = entryOf(ids.memberA);
+      const { body: op } = await prepareCorrection(tokens.member, { entryId: entry.id, description: "Reviews" });
+
+      expect((await viewAs(userId, op.id)).status).toBe(404);
+      expect((await confirmSeen(userId, op.id)).status).toBe(404);
+      expect(entry.description).toBeNull();
+    });
+  });
+
+  it("cancel writes nothing, is audited and blocks a later confirm", async () => {
+    const entry = entryOf(ids.memberA);
+    const { body: op } = await prepareCorrection(tokens.member, { entryId: entry.id, description: "Reviews" });
+
+    expect((await cancelAs(ids.memberA, op.id)).body.status).toBe("cancelled");
+    expect((await confirmSeen(ids.memberA, op.id)).status).toBe(409);
+    expect(entry.description).toBeNull();
+    expect(state.db.auditLogs.find((log) => log.entityId === op.id)).toMatchObject({
+      action: "cancel",
+      summary: 'Cancelled time entry correction prepared by integration "Raycast"',
+    });
+  });
+
+  it("status needs the scope of the operation's kind", async () => {
+    const { body: op } = await prepareCorrection(tokens.member, { entryId: entryOf(ids.memberA).id, description: "Reviews" });
+
+    expect((await statusOf(tokens.member, op.id)).body).toMatchObject({ id: op.id, kind: "correct_entry", status: "pending" });
+    expect((await statusOf(tokens.memberCreate, op.id)).status).toBe(403);
+    expect((await statusOf(tokens.memberA2, op.id)).status).toBe(404);
+  });
+
+  it("marks the view unusable when the token loses the correct scope", async () => {
+    const { body: op } = await prepareCorrection(tokens.member, { entryId: entryOf(ids.memberA).id, description: "Reviews" });
+    state.db.tokens.find((t) => t.userId === ids.memberA)!.scopes = ["read", "create"];
+    expect((await viewAs(ids.memberA, op.id)).body.integration.tokenUsable).toBe(false);
+  });
+
+  describe("review fixes", () => {
+    it("lets a time or description change through when the entry's task was deleted later", async () => {
+      const entry = state.db.timeEntries.find((e) => e.userId === ids.adminA && e.taskId === ids.taskA1)!;
+      state.db.tasks.find((t) => t.id === ids.taskA1)!.isDeleted = true;
+
+      const { status, body } = await prepareCorrection(tokens.admin, { entryId: entry.id, description: "Reviews" });
+
+      expect(status).toBe(201);
+      expect((await confirmSeen(ids.adminA, body.id)).body.status).toBe("confirmed");
+      expect(entry.taskId).toBe(ids.taskA1);
+    });
+
+    it("re-opens a confirmed correction when the entry no longer has its values, and stays idempotent otherwise", async () => {
+      const entry = entryOf(ids.memberA);
+      const toTrue = await prepareCorrection(tokens.member, { entryId: entry.id, isBillable: true });
+      await confirmSeen(ids.memberA, toTrue.body.id);
+      expect((await prepareCorrection(tokens.member, { entryId: entry.id, isBillable: true })).body.status).toBe("confirmed");
+
+      const toFalse = await prepareCorrection(tokens.member, { idempotencyKey: "fix-2", entryId: entry.id, isBillable: false });
+      await confirmSeen(ids.memberA, toFalse.body.id);
+      expect(entry.isBillable).toBe(false);
+
+      const again = await prepareCorrection(tokens.member, { entryId: entry.id, isBillable: true });
+
+      expect(again.status).toBe(200);
+      expect(again.body).toMatchObject({ id: toTrue.body.id, status: "pending", confirmedAt: null, before: { isBillable: false }, entry: { isBillable: true } });
+      expect((await confirmSeen(ids.memberA, again.body.id)).body.status).toBe("confirmed");
+      expect(entry.isBillable).toBe(true);
+      expect(state.db.auditLogs.filter((log) => log.entityId === entry.id)).toHaveLength(3);
+    });
+
+    it("requires the preview version on confirm", async () => {
+      const entry = entryOf(ids.memberA);
+      const { body: op } = await prepareCorrection(tokens.member, { entryId: entry.id, description: "Reviews" });
+
+      expect(op.previewVersion).toMatch(/^[0-9a-f]{16}$/);
+      expect((await confirmAs(ids.memberA, op.id)).status).toBe(400);
+      expect(entry.description).toBeNull();
+    });
+
+    it("refuses a confirm from a stale preview after a refresh, without writing", async () => {
+      const entry = entryOf(ids.memberA);
+      const { body: op } = await prepareCorrection(tokens.member, { entryId: entry.id, endTime: "2026-11-20T10:30:00.000Z" });
+      entry.description = "edited in the app";
+      const refreshed = await confirmAs(ids.memberA, op.id, { previewVersion: op.previewVersion });
+      expect(refreshed.body.code).toBe("entry_changed");
+      const newVersion = refreshed.body.operation.previewVersion;
+      expect(newVersion).not.toBe(op.previewVersion);
+
+      // A second tab still shows the first preview.
+      const stale = await confirmAs(ids.memberA, op.id, { previewVersion: op.previewVersion });
+
+      expect(stale.status).toBe(409);
+      expect(stale.body).toMatchObject({ code: "entry_changed", operation: { status: "pending", previewVersion: newVersion } });
+      expect(entry.endTime).toEqual(new Date("2026-11-20T10:00:00.000Z"));
+
+      expect((await confirmAs(ids.memberA, op.id, { previewVersion: newVersion })).body.status).toBe("confirmed");
+      expect(entry).toMatchObject({ endTime: new Date("2026-11-20T10:30:00.000Z"), description: "edited in the app" });
+    });
+
+    it("writes nothing when the refreshed preview no longer changes anything", async () => {
+      const entry = entryOf(ids.memberA);
+      const { body: op } = await prepareCorrection(tokens.member, { entryId: entry.id, description: "Reviews" });
+      entry.description = "Reviews";
+      vi.setSystemTime(new Date(NOW.getTime() + 10 * 60_000));
+
+      // The conflict refresh finds the change already made: no "confirm again" with nothing to change.
+      const noop = await confirmAs(ids.memberA, op.id, { previewVersion: op.previewVersion });
+
+      expect(noop).toMatchObject({ status: 409, body: { error: "The entry already has these values; nothing to correct" } });
+      expect(state.db.operations[0]).toMatchObject({
+        status: "pending",
+        resultEntryId: null,
+        expiresAt: new Date(op.expiresAt),
+        payload: { before: { description: "Reviews" } },
+      });
+      expect(state.db.auditLogs.filter((log) => log.entityId === entry.id)).toHaveLength(0);
+    });
+
+    it("rejects an unknown kind instead of treating it as a new entry", async () => {
+      const { status } = await prepareEntry(tokens.member, { kind: "delete_entry" });
+      expect(status).toBe(400);
+      expect(state.db.operations).toHaveLength(0);
+    });
   });
 });

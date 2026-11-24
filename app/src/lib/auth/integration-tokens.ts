@@ -14,7 +14,7 @@ import { AuthError } from "./helpers";
 
 export const INTEGRATION_TOKEN_PREFIX = "tbp_";
 export const INTEGRATION_TOKEN_MAX_DAYS = 90;
-export const INTEGRATION_SCOPES = ["read", "create"] as const;
+export const INTEGRATION_SCOPES = ["read", "create", "correct"] as const;
 export type IntegrationScope = (typeof INTEGRATION_SCOPES)[number];
 
 const TOKEN_PATTERN = /^tbp_[A-Za-z0-9_-]{43}$/;
@@ -33,13 +33,15 @@ export interface IntegrationCaller {
   userId: string;
   accountId: string;
   role: UserRole;
+  scopes: string[];
   /** Access with `userId` forced to the token owner. */
   access: MemberAccess;
 }
 
+/** `scope` may list several: the token needs any one of them. */
 export async function authenticateIntegration(
   request: Request,
-  scope: IntegrationScope,
+  scope: IntegrationScope | IntegrationScope[],
 ): Promise<IntegrationCaller> {
   const [scheme, token] = (request.headers.get("authorization") ?? "").split(" ");
   if (scheme !== "Bearer" || !token || !TOKEN_PATTERN.test(token)) {
@@ -83,7 +85,7 @@ export async function authenticateIntegration(
     throw new AuthError(401, "Invalid integration token");
   }
 
-  if (!row.scopes.includes(scope)) {
+  if (![scope].flat().some((s) => row.scopes.includes(s))) {
     throw new AuthError(403, "Token lacks the required scope");
   }
 
@@ -95,6 +97,7 @@ export async function authenticateIntegration(
     userId: user.id,
     accountId: row.accountId,
     role: user.role,
+    scopes: row.scopes,
     access: { ...access, userId: user.id },
   };
 }

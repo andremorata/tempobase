@@ -46,6 +46,20 @@ function CopyButton({ value, label, toastMessage }: { value: string; label: stri
   );
 }
 
+const WRITE_SCOPES = [
+  {
+    scope: "create",
+    label: "Allow creating entries",
+    description: "The MCP can prepare new time entries. Nothing is saved until you confirm each one in TempoBase.",
+  },
+  {
+    scope: "correct",
+    label: "Allow correcting entries",
+    description: "The MCP can prepare changes to your existing entries. Nothing changes until you confirm each one in TempoBase.",
+  },
+] as const;
+type WriteScope = (typeof WRITE_SCOPES)[number]["scope"];
+
 export function IntegrationTokensCard() {
   const { data: tokens, isLoading, isError, refetch } = useIntegrationTokens();
   const { data: profile } = useCurrentUserProfile();
@@ -54,7 +68,7 @@ export function IntegrationTokensCard() {
 
   const [name, setName] = useState("Raycast");
   const [expiresInDays, setExpiresInDays] = useState("30");
-  const [allowCreate, setAllowCreate] = useState(false);
+  const [writeScopes, setWriteScopes] = useState<WriteScope[]>([]);
   const canCreateEntries = hasRole(TRACKER_ROLES, profile?.role);
   const [created, setCreated] = useState<CreatedIntegrationToken | null>(null);
   const [revoking, setRevoking] = useState<IntegrationToken | null>(null);
@@ -70,7 +84,7 @@ export function IntegrationTokensCard() {
         await createToken.mutateAsync({
           name: name.trim(),
           expiresInDays: Number(expiresInDays),
-          scopes: allowCreate && canCreateEntries ? ["create"] : [],
+          scopes: canCreateEntries ? WRITE_SCOPES.map((w) => w.scope).filter((scope) => writeScopes.includes(scope)) : [],
         }),
       );
     } catch (err) {
@@ -100,7 +114,7 @@ export function IntegrationTokensCard() {
         </div>
         <CardDescription>
           Personal tokens let the local TempoBase MCP (for example in Raycast) read your own hours and entries, and
-          optionally prepare new entries that you confirm here. Changing your password revokes them.
+          optionally prepare new entries or corrections that you confirm here. Changing your password revokes them.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -136,23 +150,25 @@ export function IntegrationTokensCard() {
           </div>
           {canCreateEntries && (
             <div className="space-y-3 rounded-xl border border-border/70 bg-muted/30 p-4 md:col-span-2">
-              <div className="flex items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <Label htmlFor="integration-token-create">Allow creating entries</Label>
-                  <p className="text-sm text-muted-foreground">
-                    The MCP can prepare new time entries. Nothing is saved until you confirm each one in TempoBase.
-                  </p>
+              {WRITE_SCOPES.map((write) => (
+                <div key={write.scope} className="flex items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <Label htmlFor={`integration-token-${write.scope}`}>{write.label}</Label>
+                    <p className="text-sm text-muted-foreground">{write.description}</p>
+                  </div>
+                  <Switch
+                    id={`integration-token-${write.scope}`}
+                    checked={writeScopes.includes(write.scope)}
+                    onCheckedChange={(checked) =>
+                      setWriteScopes((current) => (checked ? [...current, write.scope] : current.filter((s) => s !== write.scope)))
+                    }
+                    disabled={createToken.isPending}
+                  />
                 </div>
-                <Switch
-                  id="integration-token-create"
-                  checked={allowCreate}
-                  onCheckedChange={setAllowCreate}
-                  disabled={createToken.isPending}
-                />
-              </div>
+              ))}
               <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300">
                 <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
-                Write access. The token can propose entries; you still confirm each one.
+                Write access. The token can propose changes; you still confirm each one.
               </p>
             </div>
           )}
@@ -243,10 +259,10 @@ export function IntegrationTokensCard() {
                         {token.scopes.map((scope) => (
                           <Badge
                             key={scope}
-                            variant={scope === "create" ? "outline" : "secondary"}
+                            variant={scope !== "read" ? "outline" : "secondary"}
                             className={cn(
                               "capitalize",
-                              scope === "create" && "border-amber-500/50 bg-amber-500/15 text-amber-800 dark:text-amber-300",
+                              scope !== "read" && "border-amber-500/50 bg-amber-500/15 text-amber-800 dark:text-amber-300",
                             )}
                           >
                             {scope}

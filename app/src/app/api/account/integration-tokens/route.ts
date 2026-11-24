@@ -2,7 +2,7 @@
  * Personal integration tokens of the signed-in user.
  *
  * GET  /api/account/integration-tokens - List active (non-revoked) tokens
- * POST /api/account/integration-tokens - Issue a token (read, optionally create); the plain token is returned once
+ * POST /api/account/integration-tokens - Issue a token (read, optionally create and correct); the plain token is returned once
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
     const user = await getCurrentUser();
     const validated = CreateTokenSchema.parse(await request.json());
     const scopes = INTEGRATION_SCOPES.filter((scope) => scope === "read" || validated.scopes.includes(scope));
-    if (scopes.includes("create") && !hasRole(TRACKER_ROLES, user.role)) {
+    if (scopes.some((scope) => scope !== "read") && !hasRole(TRACKER_ROLES, user.role)) {
       return NextResponse.json({ error: "Your role cannot create time entries" }, { status: 403 });
     }
 

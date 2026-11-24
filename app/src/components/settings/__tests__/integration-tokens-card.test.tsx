@@ -53,7 +53,7 @@ describe("IntegrationTokensCard", () => {
     render(<IntegrationTokensCard />);
     const scopeSwitch = screen.getByRole("switch", { name: /allow creating entries/i });
     expect(scopeSwitch).not.toBeChecked();
-    expect(screen.getByText(/write access\. the token can propose entries/i)).toBeInTheDocument();
+    expect(screen.getByText(/write access\. the token can propose changes/i)).toBeInTheDocument();
 
     await user.click(scopeSwitch);
     await user.click(screen.getByRole("button", { name: /create token/i }));
@@ -63,10 +63,22 @@ describe("IntegrationTokensCard", () => {
     expect(screen.getByText("read", { selector: "[data-slot=badge]" })).toBeInTheDocument();
   });
 
-  it("hides the create scope from viewers", () => {
+  it("adds the correct scope on its own switch, separate from create", async () => {
+    const user = userEvent.setup();
+    hooks.create.mockResolvedValue({ ...token({ scopes: ["read", "correct"] }), token: TOKEN });
+
+    render(<IntegrationTokensCard />);
+    await user.click(screen.getByRole("switch", { name: /allow correcting entries/i }));
+    await user.click(screen.getByRole("button", { name: /create token/i }));
+
+    expect(hooks.create).toHaveBeenCalledWith({ name: "Raycast", expiresInDays: 30, scopes: ["correct"] });
+  });
+
+  it("hides the write scopes from viewers", () => {
     hooks.role = "Viewer";
     render(<IntegrationTokensCard />);
     expect(screen.queryByRole("switch", { name: /allow creating entries/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: /allow correcting entries/i })).not.toBeInTheDocument();
   });
 
   it("creates a read token, shows it once and copies the full value", async () => {

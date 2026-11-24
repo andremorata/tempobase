@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "../client";
-import type { IntegrationOperation } from "../types";
+import { ApiError, apiFetch } from "../client";
+import type { IntegrationOperation, IntegrationOperationConflict } from "../types";
 import { TIME_ENTRIES_KEY } from "./time-entries";
 
 const operationKey = (id: string) => ["integration-operations", id] as const;
@@ -16,12 +16,22 @@ export function useIntegrationOperation(id: string) {
 function useOperationAction(id: string, action: "confirm" | "cancel") {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => apiFetch<IntegrationOperation>(`/account/integration-operations/${id}/${action}`, { method: "POST" }),
+    // Confirm sends the preview version the user saw; the server refuses a stale one.
+    mutationFn: (body?: { previewVersion: string }) =>
+      apiFetch<IntegrationOperation>(`/account/integration-operations/${id}/${action}`, {
+        method: "POST",
+        body,
+      }),
     onSuccess: (op) => {
       qc.setQueryData(operationKey(id), op);
       if (action === "confirm") void qc.invalidateQueries({ queryKey: TIME_ENTRIES_KEY });
     },
-    onError: () => qc.invalidateQueries({ queryKey: operationKey(id) }),
+    onError: (error) => {
+      // A correction whose entry changed comes back with its refreshed preview.
+      const conflict = error instanceof ApiError ? (error.data as Partial<IntegrationOperationConflict> | undefined) : undefined;
+      if (conflict?.code === "entry_changed" && conflict.operation) qc.setQueryData(operationKey(id), conflict.operation);
+      else void qc.invalidateQueries({ queryKey: operationKey(id) });
+    },
   });
 }
 
