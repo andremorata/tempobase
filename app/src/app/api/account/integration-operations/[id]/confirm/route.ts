@@ -169,14 +169,18 @@ async function entryChangedResponse(user: User, op: Operation, now: Date) {
   if ("violation" in found) {
     return NextResponse.json({ error: `This entry can no longer be corrected: ${found.violation.error}` }, { status: 409 });
   }
+  const before = entrySnapshot(found.entry);
+  // The entry already has the requested values: record them, but do not renew the preview.
+  const noop = changedFields(before, mergeChanges(before, payload.changes)).length === 0;
   await prisma.integrationOperation.updateMany({
     where: { id: op.id, status: "pending" },
     data: {
-      payload: { ...payload, before: entrySnapshot(found.entry) } as unknown as Prisma.InputJsonObject,
-      expiresAt: new Date(now.getTime() + OPERATION_TTL_MS),
+      payload: { ...payload, before } as unknown as Prisma.InputJsonObject,
+      ...(noop ? {} : { expiresAt: new Date(now.getTime() + OPERATION_TTL_MS) }),
       updatedAt: now,
     },
   });
+  if (noop) return NextResponse.json({ error: NOTHING_TO_CORRECT }, { status: 409 });
   return entryChangedJson(await toOperationView((await findOwnOperation(user, op.id))!));
 }
 

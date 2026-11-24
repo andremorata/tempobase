@@ -763,13 +763,18 @@ describe("entry corrections", () => {
       const entry = entryOf(ids.memberA);
       const { body: op } = await prepareCorrection(tokens.member, { entryId: entry.id, description: "Reviews" });
       entry.description = "Reviews";
-      const refreshed = await confirmAs(ids.memberA, op.id, { previewVersion: op.previewVersion });
-      expect(refreshed.body.operation.changedFields).toEqual([]);
+      vi.setSystemTime(new Date(NOW.getTime() + 10 * 60_000));
 
-      const noop = await confirmAs(ids.memberA, op.id, { previewVersion: refreshed.body.operation.previewVersion });
+      // The conflict refresh finds the change already made: no "confirm again" with nothing to change.
+      const noop = await confirmAs(ids.memberA, op.id, { previewVersion: op.previewVersion });
 
       expect(noop).toMatchObject({ status: 409, body: { error: "The entry already has these values; nothing to correct" } });
-      expect(state.db.operations[0]).toMatchObject({ status: "pending", resultEntryId: null });
+      expect(state.db.operations[0]).toMatchObject({
+        status: "pending",
+        resultEntryId: null,
+        expiresAt: new Date(op.expiresAt),
+        payload: { before: { description: "Reviews" } },
+      });
       expect(state.db.auditLogs.filter((log) => log.entityId === entry.id)).toHaveLength(0);
     });
 

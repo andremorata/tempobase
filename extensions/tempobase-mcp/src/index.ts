@@ -220,7 +220,7 @@ server.registerTool(
         .min(1)
         .max(100)
         .optional()
-        .describe("Omit normally: it is derived from the entry and the changes. Pass a new value only to apply the same change again after it was confirmed and later undone in TempoBase."),
+        .describe("Omit normally: it is derived from the entry and the changes. A change that was confirmed and later undone in TempoBase re-opens with the derived key; pass a new value only to prepare a separate operation on purpose."),
     },
   },
   (args) =>
@@ -240,7 +240,7 @@ server.registerTool(
   {
     title: "Get operation status",
     description:
-      "Status of an operation prepared with prepare_time_entry or prepare_time_entry_correction: pending, confirmed (with entryId), cancelled or expired. For a correction, before is the entry now and entry is the result. Use it after the user says they confirmed or cancelled.",
+      "Status of an operation prepared with prepare_time_entry or prepare_time_entry_correction: pending, confirmed (with entryId), cancelled or expired. For a correction, before is the entry as previewed (the latest preview while pending, the values replaced once confirmed) and entry is the result. Use it after the user says they confirmed or cancelled.",
     inputSchema: { operationId: z.string().uuid().describe("id returned by prepare_time_entry or prepare_time_entry_correction.") },
   },
   (args) => run(async () => describeOperation((await apiGet(config, `operations/${args.operationId}`, {})) as Operation)),
