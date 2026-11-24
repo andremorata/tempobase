@@ -85,6 +85,11 @@ export type EntryChanges = Partial<EntryPayload>;
  */
 export function buildCorrectionChanges(args: CorrectionArgs, timeZone: string): EntryChanges {
   const changes: EntryChanges = {};
+  const DATE_ONLY_ANCHORS =
+    "date only anchors startTime/endTime; to move the entry to another day pass date with both startTime and endTime";
+  if ((args.date !== undefined || args.endDate !== undefined) && args.startTime === undefined && args.endTime === undefined) {
+    throw new Error(DATE_ONLY_ANCHORS);
+  }
   if (args.startTime !== undefined || args.endTime !== undefined) {
     if (!args.date) {
       throw new Error("date is required with startTime or endTime: pass the entry's local date (startLocal from list_my_time_entries).");

@@ -7,16 +7,22 @@
  * A correction writes only while the entry still matches its preview. If it changed (for example
  * edited in the app), nothing is written: the preview is refreshed with the current values and
  * the response is 409 `entry_changed`, so the user confirms again.
+ *
+ * A correction's body must carry `previewVersion`, the version of the preview the user saw (400
+ * without it). A different version, such as a second tab still showing the preview from before a
+ * refresh, gets the same 409 `entry_changed` with the current preview, and nothing is written.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { getMemberAccess, type MemberAccess } from "@/lib/auth/access";
 import { authErrorResponse, getCurrentUser } from "@/lib/auth/helpers";
 import { hasRole, TRACKER_ROLES } from "@/lib/auth/roles";
 import { createAuditLog } from "@/lib/audit/logger";
 import { prisma } from "@/lib/db/prisma";
 import {
+  changedFields,
   checkCorrection,
   checkEntryPayload,
   correctionData,
@@ -25,9 +31,12 @@ import {
   entrySnapshot,
   findCorrectableEntry,
   findOwnOperation,
+  mergeChanges,
+  NOTHING_TO_CORRECT,
   OPERATION_NOT_FOUND,
   OPERATION_TTL_MS,
   operationStatus,
+  previewVersionOf,
   tokenUsable,
   toOperationView,
   unchangedSince,
@@ -104,9 +113,17 @@ async function confirmCreate(user: User, access: MemberAccess, op: Operation, no
 
 class EntryChanged extends Error {}
 
-async function confirmCorrection(user: User, access: MemberAccess, op: Operation, now: Date) {
+const ConfirmBodySchema = z.object({ previewVersion: z.string().min(1).max(64).optional() });
+
+async function confirmCorrection(user: User, access: MemberAccess, op: Operation, now: Date, previewVersion?: string) {
   const { entryId, changes, before } = op.payload as unknown as CorrectionPayload;
   const owner = { accountId: user.accountId, userId: user.id };
+
+  if (!previewVersion) return NextResponse.json({ error: "previewVersion is required to confirm a correction" }, { status: 400 });
+  if (previewVersion !== previewVersionOf(before)) return entryChangedJson(await toOperationView(op, now));
+  if (changedFields(before, mergeChanges(before, changes)).length === 0) {
+    return NextResponse.json({ error: NOTHING_TO_CORRECT }, { status: 409 });
+  }
 
   const found = await findCorrectableEntry(owner, entryId);
   if ("violation" in found) {
@@ -160,18 +177,21 @@ async function entryChangedResponse(user: User, op: Operation, now: Date) {
       updatedAt: now,
     },
   });
-  const current = (await findOwnOperation(user, op.id))!;
+  return entryChangedJson(await toOperationView((await findOwnOperation(user, op.id))!));
+}
+
+function entryChangedJson(operation: Awaited<ReturnType<typeof toOperationView>>) {
   return NextResponse.json(
     {
       error: "This entry changed after the preview, so nothing was saved. Review the current values and confirm again.",
       code: ENTRY_CHANGED,
-      operation: await toOperationView(current),
+      operation,
     },
     { status: 409 },
   );
 }
 
-export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await getCurrentUser();
     const op = await findOwnOperation(user, (await params).id);
@@ -192,9 +212,12 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: "Your role cannot change time entries" }, { status: 403 });
     }
 
+    const parsed = ConfirmBodySchema.safeParse(await request.json().catch(() => ({})));
+    if (!parsed.success) return NextResponse.json({ error: "Invalid previewVersion" }, { status: 400 });
+
     const access = await getMemberAccess(user.id, user.accountId, user.role);
     return op.kind === CORRECT_ENTRY
-      ? await confirmCorrection(user, access, op, now)
+      ? await confirmCorrection(user, access, op, now, parsed.data.previewVersion)
       : await confirmCreate(user, access, op, now);
   } catch (error) {
     const authResponse = authErrorResponse(error);

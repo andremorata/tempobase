@@ -296,5 +296,5 @@ export function createFakeDb(now: Date) {
     },
   };
 
-  return { prisma, users, accounts, projects, tokens, operations, timeEntries, auditLogs, projectAccess, addToken };
+  return { prisma, users, accounts, projects, tasks, tokens, operations, timeEntries, auditLogs, projectAccess, addToken };
 }

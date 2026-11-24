@@ -38,6 +38,8 @@ On confirm, TempoBase checks again that the token is valid and still has `create
 4. If the entry was edited in TempoBase after the preview, confirming saves nothing. The page shows the entry's current values with your change applied, and you confirm again.
 5. Ask the agent for the result. `get_operation_status` returns `confirmed`, or `cancelled` / `expired`.
 
+Calling the tool again with the same changes returns the same operation. Once confirmed, it is prepared again only if the entry no longer has those values. `date` and `endDate` only anchor `startTime`/`endTime`; to move an entry to another day, pass `date` with both times.
+
 Running timers, other users' entries, deletion and bulk changes are out of scope.
 
 Set `TEMPOBASE_OPEN_BROWSER=0` to return the link without opening it.

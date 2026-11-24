@@ -351,7 +351,7 @@ function OperationCard({ op, dateFormat }: { op: IntegrationOperation; dateForma
     const shownBefore = op.before;
     setConflictFrom(null);
     try {
-      await action.mutateAsync();
+      await (action === confirm ? confirm.mutateAsync({ previewVersion: op.previewVersion }) : action.mutateAsync(undefined));
     } catch (err) {
       // The refreshed preview is already on screen; the banner explains why it changed.
       if (err instanceof ApiError && (err.data as Partial<IntegrationOperationConflict> | undefined)?.code === "entry_changed") {

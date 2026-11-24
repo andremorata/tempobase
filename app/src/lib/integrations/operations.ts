@@ -3,6 +3,7 @@
  * in the app. `create_entry` adds a manual entry; `correct_entry` changes fields of an existing one.
  */
 
+import { createHash } from "node:crypto";
 import type { IntegrationOperation, Prisma, TimeEntry } from "@prisma/client";
 import { z } from "zod";
 import {
@@ -163,7 +164,9 @@ export async function checkCorrection(
   if (after.projectId !== before.projectId && !(await isProjectOpenForEntries(accountId, after.projectId))) {
     return { status: 409, error: PROJECT_NOT_ACTIVE_ERROR };
   }
-  if (after.taskId) {
+  // Only when the request touches project or task: like PUT, an entry whose task was deleted later
+  // still takes a time or description change.
+  if (after.taskId && (changes.projectId !== undefined || changes.taskId !== undefined)) {
     const task = await prisma.projectTask.findFirst({
       where: { id: after.taskId, accountId, isDeleted: false },
       select: { projectId: true },
@@ -220,6 +223,21 @@ export function correctionData(before: EntryPayload, changes: EntryChanges, now:
 }
 
 export const ENTRY_CHANGED = "entry_changed";
+export const NOTHING_TO_CORRECT = "The entry already has these values; nothing to correct";
+
+/**
+ * Identifies the preview the user saw: the entry for `create_entry`, the `before` snapshot for
+ * `correct_entry`. Confirm compares it, so a tab showing an older preview cannot confirm it.
+ */
+export function previewVersionOf(fields: EntryPayload): string {
+  const canonical = JSON.stringify(PAYLOAD_KEYS.map((key) => fields[key]));
+  return createHash("sha256").update(canonical).digest("hex").slice(0, 16);
+}
+
+/** True when the entry no longer has the values a confirmed correction wrote. */
+export function correctionUndone(payload: CorrectionPayload, current: EntryPayload): boolean {
+  return PAYLOAD_KEYS.some((key) => payload.changes[key] !== undefined && payload.changes[key] !== current[key]);
+}
 
 export function operationStatus(op: Pick<IntegrationOperation, "status" | "expiresAt">, now: Date): OperationStatus {
   if (op.status === "pending" && op.expiresAt <= now) return "expired";
@@ -319,6 +337,7 @@ export async function toOperationView(op: OperationWithToken, now = new Date()) 
     entry,
     before,
     changedFields: correction ? changedFields(correction.before, fields) : [],
+    previewVersion: previewVersionOf(correction ? correction.before : fields),
     integration: { name: op.token.name, tokenPrefix: op.token.tokenPrefix, tokenUsable: tokenUsable(op.token, op.kind, now) },
   };
 }

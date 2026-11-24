@@ -43,6 +43,7 @@ function operation(overrides: Partial<IntegrationOperation> = {}, tokenUsable = 
     },
     before: null,
     changedFields: [],
+    previewVersion: "v1",
     integration: { name: "Raycast", tokenPrefix: "tbp_abcdefgh", tokenUsable },
     ...overrides,
   };
@@ -162,6 +163,7 @@ describe("IntegrationOperationPage", () => {
       const alert = screen.getByRole("alert");
       expect(alert).toHaveTextContent("This entry changed after the preview");
       expect(alert).toHaveFocus();
+      expect(hooks.confirm).toHaveBeenCalledWith({ previewVersion: "v1" });
       const elsewhere = Array.from(document.querySelectorAll("[data-changed-elsewhere]"));
       expect(elsewhere.map((row) => row.querySelector("dt")?.textContent)).toEqual(["Description"]);
       expect(within(elsewhere[0] as HTMLElement).getByText("Changed in TempoBase")).toBeInTheDocument();

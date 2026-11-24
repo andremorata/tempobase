@@ -194,13 +194,15 @@ server.registerTool(
       "Pass only the fields the user asked to change; every other field stays as it is. Never invent values: when the user's request is ambiguous or a value is missing, ask. " +
       `Times are wall-clock HH:mm in ${config.timeZone}. Running timers, other users' entries, deletion and bulk changes are not supported. ` +
       "If the entry changes in TempoBase before the user confirms, the correction is not applied over it: TempoBase shows the new values and asks to confirm again. " +
-      "Calling again with the same changes returns the same operation, and re-opens it when it was cancelled or expired.",
+      "Calling again with the same changes returns the same operation, and re-opens it when it was cancelled or expired, or when it was confirmed but the entry no longer has those values.",
     inputSchema: {
       entryId: z.string().uuid().describe("id of the entry, from list_my_time_entries."),
       date: z
         .string()
         .optional()
-        .describe("Local day of the entry's start, YYYY-MM-DD (the date in startLocal). Required when startTime or endTime is given; otherwise ignored."),
+        .describe(
+          "Local day of the entry's start, YYYY-MM-DD (the date in startLocal). Required with startTime or endTime, and refused without them: date only anchors startTime/endTime; to move the entry to another day pass date with both startTime and endTime.",
+        ),
       startTime: z.string().optional().describe(`New start time, HH:mm (24 h) in ${config.timeZone}.`),
       endTime: z.string().optional().describe(`New end time, HH:mm (24 h) in ${config.timeZone}.`),
       endDate: z.string().optional().describe("Local day of the end time, YYYY-MM-DD, only when the entry crosses midnight. Defaults to date."),

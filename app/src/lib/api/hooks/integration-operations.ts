@@ -16,7 +16,12 @@ export function useIntegrationOperation(id: string) {
 function useOperationAction(id: string, action: "confirm" | "cancel") {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => apiFetch<IntegrationOperation>(`/account/integration-operations/${id}/${action}`, { method: "POST" }),
+    // Confirm sends the preview version the user saw; the server refuses a stale one.
+    mutationFn: (body?: { previewVersion: string }) =>
+      apiFetch<IntegrationOperation>(`/account/integration-operations/${id}/${action}`, {
+        method: "POST",
+        body,
+      }),
     onSuccess: (op) => {
       qc.setQueryData(operationKey(id), op);
       if (action === "confirm") void qc.invalidateQueries({ queryKey: TIME_ENTRIES_KEY });

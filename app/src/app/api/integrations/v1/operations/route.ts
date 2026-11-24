@@ -7,6 +7,11 @@
  *
  * Writes nothing to time entries. The same token and idempotencyKey return the same operation
  * (re-opened when it was cancelled or expired); reusing the key for a different write returns 409.
+ * A confirmed correction is also re-opened, with a fresh `before`, once the entry no longer has the
+ * values it wrote (for example billable true, then false, then true again). While the entry still
+ * has them, the confirmed operation is returned, so a retry after a network failure stays
+ * idempotent. The audit log keeps each confirmed write. Any other `kind` returns 400; no `kind`
+ * means `create_entry`.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -20,12 +25,14 @@ import {
   checkCorrection,
   checkEntryPayload,
   confirmPath,
+  correctionUndone,
   CORRECT_ENTRY,
   CREATE_ENTRY,
   entrySnapshot,
   findCorrectableEntry,
   KIND_SCOPE,
   mergeChanges,
+  NOTHING_TO_CORRECT,
   OPERATION_TTL_MS,
   operationInclude,
   operationStatus,
@@ -49,6 +56,8 @@ interface Prepared {
   idempotencyKey: string;
   same: (stored: IntegrationOperation["payload"]) => boolean;
   build: () => Promise<{ payload: object } | { violation: EntryRuleViolation }>;
+  /** True when a confirmed operation should be prepared again because its result no longer holds. */
+  undone?: (stored: IntegrationOperation["payload"]) => Promise<boolean>;
 }
 
 function prepareCreate(caller: IntegrationCaller, input: z.infer<typeof PrepareEntrySchema>): Prepared {
@@ -70,13 +79,17 @@ function prepareCorrection(caller: IntegrationCaller, input: z.infer<typeof Prep
     kind: CORRECT_ENTRY,
     idempotencyKey: input.idempotencyKey,
     same: (stored) => sameCorrection(stored as unknown as CorrectionPayload, request),
+    undone: async (stored) => {
+      const found = await findCorrectableEntry({ accountId: caller.accountId, userId: caller.userId }, request.entryId);
+      return "entry" in found && correctionUndone(stored as unknown as CorrectionPayload, entrySnapshot(found.entry));
+    },
     // Snapshot the entry now: this is the "before" the user sees and confirm compares against.
     build: async () => {
       const found = await findCorrectableEntry({ accountId: caller.accountId, userId: caller.userId }, request.entryId);
       if ("violation" in found) return found;
       const before = entrySnapshot(found.entry);
       if (changedFields(before, mergeChanges(before, request.changes)).length === 0) {
-        return { violation: { status: 400, error: "The entry already has these values; nothing to correct" } };
+        return { violation: { status: 400, error: NOTHING_TO_CORRECT } };
       }
       const violation = await checkCorrection(caller.accountId, caller.access, before, request.changes);
       return violation ? { violation } : { payload: { ...request, before } satisfies CorrectionPayload };
@@ -103,19 +116,26 @@ async function existingOperation(caller: IntegrationCaller, prepared: Prepared, 
 
   const now = new Date();
   const status = operationStatus(existing, now);
-  if (status !== "cancelled" && status !== "expired") return NextResponse.json(await withConfirmUrl(existing, request));
+  const reopenConfirmed = status === "confirmed" && (await prepared.undone?.(existing.payload)) === true;
+  if (status !== "cancelled" && status !== "expired" && !reopenConfirmed) {
+    return NextResponse.json(await withConfirmUrl(existing, request));
+  }
 
   const built = await prepared.build();
   if ("violation" in built) return violationResponse(built.violation);
 
-  // Only a still-dead row is re-opened, so a confirmed operation is never touched.
+  // Only a still-dead row (or the confirmed correction just checked) is re-opened.
+  const reopenable: Prisma.IntegrationOperationWhereInput[] = [{ status: "cancelled" }, { status: "pending", expiresAt: { lte: now } }];
+  if (reopenConfirmed) reopenable.push({ status: "confirmed" });
   await prisma.integrationOperation.updateMany({
-    where: { id: existing.id, OR: [{ status: "cancelled" }, { status: "pending", expiresAt: { lte: now } }] },
+    where: { id: existing.id, OR: reopenable },
     data: {
       status: "pending",
       payload: built.payload as Prisma.InputJsonObject,
       expiresAt: new Date(now.getTime() + OPERATION_TTL_MS),
       cancelledAt: null,
+      confirmedAt: null,
+      resultEntryId: null,
       updatedAt: now,
     },
   });
@@ -135,6 +155,10 @@ function validationError(error: z.ZodError) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => null);
+    if (body?.kind !== undefined && body.kind !== CREATE_ENTRY && body.kind !== CORRECT_ENTRY) {
+      await authenticateIntegration(request, ["create", "correct"]);
+      return NextResponse.json({ error: `Unknown kind "${String(body.kind)}"` }, { status: 400 });
+    }
     const kind: OperationKind = body?.kind === CORRECT_ENTRY ? CORRECT_ENTRY : CREATE_ENTRY;
     const caller = await authenticateIntegration(request, KIND_SCOPE[kind]);
     if (!hasRole(TRACKER_ROLES, caller.role)) {

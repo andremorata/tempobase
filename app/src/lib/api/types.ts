@@ -315,6 +315,8 @@ export interface IntegrationOperation {
   /** For a correction, the entry as it is now; null for a new entry. */
   before: IntegrationOperationEntry | null;
   changedFields: IntegrationOperationField[];
+  /** Version of the preview shown; confirm sends it back and gets 409 `entry_changed` if it is stale. */
+  previewVersion: string;
   /** tokenUsable is false once the token is revoked, expired or without the scope this kind needs. */
   integration: { name: string; tokenPrefix: string; tokenUsable: boolean };
 }

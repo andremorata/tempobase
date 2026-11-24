@@ -113,3 +113,11 @@ test("next steps for a correction speak of changes, not new entries", () => {
   assert.match(nextStepFor({ kind: "correct_entry", status: "pending", entryDeleted: false }), /Nothing is changed yet/);
   assert.match(nextStepFor({ kind: "correct_entry", status: "cancelled", entryDeleted: false }), /prepare_time_entry_correction/);
 });
+
+test("a correction refuses date or endDate without a time to anchor", () => {
+  assert.throws(
+    () => buildCorrectionChanges({ entryId: "e1", date: "2026-11-21", description: "x" }, SAO_PAULO),
+    /date only anchors startTime\/endTime; to move the entry to another day pass date with both startTime and endTime/,
+  );
+  assert.throws(() => buildCorrectionChanges({ entryId: "e1", endDate: "2026-11-21", billable: true }, SAO_PAULO), /date only anchors/);
+});
